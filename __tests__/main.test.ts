@@ -6,6 +6,9 @@ const core = {
   setFailed: jest.fn()
 }
 jest.unstable_mockModule('@actions/core', () => core)
+jest.unstable_mockModule('../src/linux.js', () => ({
+  installMultiArch: jest.fn()
+}))
 
 const { makePlan, run } = await import('../src/main.js')
 
