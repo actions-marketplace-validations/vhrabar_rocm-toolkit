@@ -58,8 +58,13 @@ jobs:
           test "${{ steps.rocm.outputs.version }}" = "10.1.0"
       - name: hipcc --version
         run: hipcc --version
-      - name: Compile and link a HIP program (not run, no GPU)
+      - name: Compile and link a HIP program
         run: hipcc .github/smoke/hello.hip -o hello --offload-arch=gfx1200
+      - name: Build the library smoke tests with CMake
+        run: |
+          cmake -S .github/smoke -B build \
+            -DCMAKE_PREFIX_PATH="$ROCM_PATH" -DSMOKE_REQUIRE_LIBS=ON
+          cmake --build build
 
   idempotent-linux:
     name: Running twice on ubuntu-24.04
@@ -115,5 +120,9 @@ jobs:
           test -x "$ROCM_PATH/bin/hipcc"
       - name: hipcc --version
         run: hipcc --version
-      - name: Compile and link a HIP program (not run, no GPU)
+      - name: Compile and link a HIP program
         run: hipcc .github/smoke/hello.hip -o hello --offload-arch=gfx1200
+      - name: Build the smoke tests with CMake (libraries are optional here)
+        run: |
+          cmake -S .github/smoke -B build -DCMAKE_PREFIX_PATH="$ROCM_PATH"
+          cmake --build build
