@@ -31,6 +31,8 @@ updates:
       # Keep @types/node on the same major as the runtime in .nvmrc / engines
       - dependency-name: '@types/node'
         update-types: ['version-update:semver-major']
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
     groups:
       npm-development:
         dependency-type: development
