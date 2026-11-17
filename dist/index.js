@@ -34224,15 +34224,18 @@ function readRawInputs() {
         logFileSuffix: getInput('log-file-suffix')
     };
 }
-function makePlan(raw, platform) {
+/**
+ * Validate inputs first so a bad input is reported even on an unsupported
+ * platform, then detect the platform.
+ */
+function makePlan(raw, detect) {
     const inputs = parseInputs(raw);
     const scheme = selectScheme(parseVersion(inputs.version));
-    return { inputs, platform, scheme };
+    return { inputs, platform: detect(), scheme };
 }
 async function run() {
     try {
-        const platform = detectPlatform(process.platform, os$1.arch(), () => fs$1.readFileSync('/etc/os-release', 'utf8'));
-        const plan = makePlan(readRawInputs(), platform);
+        const plan = makePlan(readRawInputs(), () => detectPlatform(process.platform, os$1.arch(), () => fs$1.readFileSync('/etc/os-release', 'utf8')));
         info(`Plan: ROCm ${plan.inputs.version} on ${plan.platform.os} ` +
             `(${plan.scheme}, gfx: ${plan.inputs.gfx.join(',') || 'all'})`);
         if (plan.platform.os === 'linux' && plan.scheme === 'multiarch') {

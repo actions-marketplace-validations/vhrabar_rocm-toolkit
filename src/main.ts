@@ -23,21 +23,26 @@ export function readRawInputs(): Parameters<typeof parseInputs>[0] {
   }
 }
 
+/**
+ * Validate inputs first so a bad input is reported even on an unsupported
+ * platform, then detect the platform.
+ */
 export function makePlan(
   raw: Parameters<typeof parseInputs>[0],
-  platform: Platform
+  detect: () => Platform
 ): Plan {
   const inputs = parseInputs(raw)
   const scheme = selectScheme(parseVersion(inputs.version))
-  return { inputs, platform, scheme }
+  return { inputs, platform: detect(), scheme }
 }
 
 export async function run(): Promise<void> {
   try {
-    const platform = detectPlatform(process.platform, os.arch(), () =>
-      fs.readFileSync('/etc/os-release', 'utf8')
+    const plan = makePlan(readRawInputs(), () =>
+      detectPlatform(process.platform, os.arch(), () =>
+        fs.readFileSync('/etc/os-release', 'utf8')
+      )
     )
-    const plan = makePlan(readRawInputs(), platform)
     core.info(
       `Plan: ROCm ${plan.inputs.version} on ${plan.platform.os} ` +
         `(${plan.scheme}, gfx: ${plan.inputs.gfx.join(',') || 'all'})`

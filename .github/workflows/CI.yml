@@ -60,3 +60,29 @@ jobs:
         run: hipcc --version
       - name: Compile and link a HIP program (not run, no GPU)
         run: hipcc .github/smoke/hello.hip -o hello --offload-arch=gfx1200
+
+  idempotent-linux:
+    name: Running twice on ubuntu-24.04
+    needs: check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install ROCm (first run)
+        id: first
+        uses: ./
+        with:
+          version: '10.1.0'
+          gfx: gfx1200
+      - name: Install ROCm (second run)
+        id: second
+        uses: ./
+        with:
+          version: '10.1.0'
+          gfx: gfx1200
+      - name: Both runs agree and hipcc works
+        run: |
+          test "${{ steps.first.outputs.ROCM_PATH }}" = "${{ steps.second.outputs.ROCM_PATH }}"
+          test "${{ steps.first.outputs.version }}" = "${{ steps.second.outputs.version }}"
+          test -x "$ROCM_PATH/bin/hipcc"
+          hipcc --version
+          hipcc .github/smoke/hello.hip -o hello --offload-arch=gfx1200
