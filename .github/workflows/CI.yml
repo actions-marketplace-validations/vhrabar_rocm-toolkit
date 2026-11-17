@@ -27,3 +27,36 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+
+  install-linux:
+    name: Install on ${{ matrix.os }}
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Disk before
+        run: df -h /
+      - name: Install ROCm
+        id: rocm
+        uses: ./
+        with:
+          version: '10.1.0'
+          gfx: gfx1200
+      - name: Disk after
+        run: df -h /
+      - name: Check outputs and environment
+        run: |
+          echo "ROCM_PATH=$ROCM_PATH HIP_PATH=$HIP_PATH"
+          echo "output ROCM_PATH=${{ steps.rocm.outputs.ROCM_PATH }}"
+          echo "output version=${{ steps.rocm.outputs.version }}"
+          test -d "$ROCM_PATH"
+          test "$ROCM_PATH" = "${{ steps.rocm.outputs.ROCM_PATH }}"
+          test "${{ steps.rocm.outputs.version }}" = "10.1.0"
+      - name: hipcc --version
+        run: hipcc --version
+      - name: Compile and link a HIP program (not run, no GPU)
+        run: hipcc .github/smoke/hello.hip -o hello --offload-arch=gfx1200
