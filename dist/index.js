@@ -32,6 +32,129 @@ import require$$1$5 from 'node:dns';
 import require$$5$3 from 'string_decoder';
 import 'child_process';
 import 'timers';
+import * as fs$1 from 'node:fs';
+import * as os$1 from 'node:os';
+
+// We use any as a valid input type
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * Sanitizes an input into a string so it can be passed into issueCommand safely
+ * @param input input to sanitize into a string
+ */
+function toCommandValue(input) {
+    if (input === null || input === undefined) {
+        return '';
+    }
+    else if (typeof input === 'string' || input instanceof String) {
+        return input;
+    }
+    return JSON.stringify(input);
+}
+/**
+ *
+ * @param annotationProperties
+ * @returns The command properties to send with the actual annotation command
+ * See IssueCommandProperties: https://github.com/actions/runner/blob/main/src/Runner.Worker/ActionCommandManager.cs#L646
+ */
+function toCommandProperties(annotationProperties) {
+    if (!Object.keys(annotationProperties).length) {
+        return {};
+    }
+    return {
+        title: annotationProperties.title,
+        file: annotationProperties.file,
+        line: annotationProperties.startLine,
+        endLine: annotationProperties.endLine,
+        col: annotationProperties.startColumn,
+        endColumn: annotationProperties.endColumn
+    };
+}
+
+/**
+ * Issues a command to the GitHub Actions runner
+ *
+ * @param command - The command name to issue
+ * @param properties - Additional properties for the command (key-value pairs)
+ * @param message - The message to include with the command
+ * @remarks
+ * This function outputs a specially formatted string to stdout that the Actions
+ * runner interprets as a command. These commands can control workflow behavior,
+ * set outputs, create annotations, mask values, and more.
+ *
+ * Command Format:
+ *   ::name key=value,key=value::message
+ *
+ * @example
+ * ```typescript
+ * // Issue a warning annotation
+ * issueCommand('warning', {}, 'This is a warning message');
+ * // Output: ::warning::This is a warning message
+ *
+ * // Set an environment variable
+ * issueCommand('set-env', { name: 'MY_VAR' }, 'some value');
+ * // Output: ::set-env name=MY_VAR::some value
+ *
+ * // Add a secret mask
+ * issueCommand('add-mask', {}, 'secretValue123');
+ * // Output: ::add-mask::secretValue123
+ * ```
+ *
+ * @internal
+ * This is an internal utility function that powers the public API functions
+ * such as setSecret, warning, error, and exportVariable.
+ */
+function issueCommand(command, properties, message) {
+    const cmd = new Command(command, properties, message);
+    process.stdout.write(cmd.toString() + os.EOL);
+}
+const CMD_STRING = '::';
+class Command {
+    constructor(command, properties, message) {
+        if (!command) {
+            command = 'missing.command';
+        }
+        this.command = command;
+        this.properties = properties;
+        this.message = message;
+    }
+    toString() {
+        let cmdStr = CMD_STRING + this.command;
+        if (this.properties && Object.keys(this.properties).length > 0) {
+            cmdStr += ' ';
+            let first = true;
+            for (const key in this.properties) {
+                if (this.properties.hasOwnProperty(key)) {
+                    const val = this.properties[key];
+                    if (val) {
+                        if (first) {
+                            first = false;
+                        }
+                        else {
+                            cmdStr += ',';
+                        }
+                        cmdStr += `${key}=${escapeProperty(val)}`;
+                    }
+                }
+            }
+        }
+        cmdStr += `${CMD_STRING}${escapeData(this.message)}`;
+        return cmdStr;
+    }
+}
+function escapeData(s) {
+    return toCommandValue(s)
+        .replace(/%/g, '%25')
+        .replace(/\r/g, '%0D')
+        .replace(/\n/g, '%0A');
+}
+function escapeProperty(s) {
+    return toCommandValue(s)
+        .replace(/%/g, '%25')
+        .replace(/\r/g, '%0D')
+        .replace(/\n/g, '%0A')
+        .replace(/:/g, '%3A')
+        .replace(/,/g, '%2C');
+}
 
 var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
 
@@ -28578,6 +28701,39 @@ var ExitCode;
     ExitCode[ExitCode["Failure"] = 1] = "Failure";
 })(ExitCode || (ExitCode = {}));
 /**
+ * Gets the value of an input.
+ * Unless trimWhitespace is set to false in InputOptions, the value is also trimmed.
+ * Returns an empty string if the value is not defined.
+ *
+ * @param     name     name of the input to get
+ * @param     options  optional. See InputOptions.
+ * @returns   string
+ */
+function getInput(name, options) {
+    const val = process.env[`INPUT_${name.replace(/ /g, '_').toUpperCase()}`] || '';
+    return val.trim();
+}
+//-----------------------------------------------------------------------
+// Results
+//-----------------------------------------------------------------------
+/**
+ * Sets the action status to failed.
+ * When the action exits it will be with an exit code of 1
+ * @param message add error issue message
+ */
+function setFailed(message) {
+    process.exitCode = ExitCode.Failure;
+    error(message);
+}
+/**
+ * Adds an error issue
+ * @param message error issue message. Errors will be converted to string via toString()
+ * @param properties optional properties to add to the annotation.
+ */
+function error(message, properties = {}) {
+    issueCommand('error', toCommandProperties(properties), message instanceof Error ? message.toString() : message);
+}
+/**
  * Writes info to log with console.log.
  * @param message info message
  */
@@ -28585,10 +28741,188 @@ function info(message) {
     process.stdout.write(message + os.EOL);
 }
 
-async function run() {
-    info('setup-rocm: not implemented yet');
+// Versions the action accepts. UNVERIFIED: confirm each entry against the real
+// repositories (see docs/RESEARCH.md) before relying on it.
+const MULTIARCH_VERSIONS = ['10.0.0', '10.1.0'];
+const LEGACY_VERSIONS = ['6.2.2', '7.0.1'];
+const SUPPORTED_VERSIONS = [
+    ...LEGACY_VERSIONS,
+    ...MULTIARCH_VERSIONS
+];
+const DEFAULT_VERSION = MULTIARCH_VERSIONS.at(-1);
+const VERSION_PATTERN = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+function parseVersion(input) {
+    const match = VERSION_PATTERN.exec(input.trim());
+    if (!match) {
+        throw new Error(`Invalid ROCm version "${input}". Expected MAJOR.MINOR.PATCH, e.g. 10.1.0.`);
+    }
+    return {
+        major: Number(match[1]),
+        minor: Number(match[2]),
+        patch: Number(match[3])
+    };
 }
-await run();
+/** Legacy: <= 7.2.x. Multi-arch: >= 10. Anything in between is unsupported. */
+function selectScheme(version) {
+    if (version.major >= 10)
+        return 'multiarch';
+    if (version.major < 7 || (version.major === 7 && version.minor <= 2)) {
+        return 'legacy';
+    }
+    throw new Error(`ROCm ${version.major}.${version.minor}.${version.patch} uses a packaging ` +
+        `scheme this action does not support. Use 10.x or 7.2.x and older.`);
+}
+function assertSupported(input) {
+    const version = parseVersion(input);
+    selectScheme(version);
+    const normalized = `${version.major}.${version.minor}.${version.patch}`;
+    if (!SUPPORTED_VERSIONS.includes(normalized)) {
+        throw new Error(`ROCm ${normalized} is not in the supported list: ` +
+            `${SUPPORTED_VERSIONS.join(', ')}.`);
+    }
+    return version;
+}
+function formatVersion(version) {
+    return `${version.major}.${version.minor}.${version.patch}`;
+}
 
-export { run };
+const COMPONENTS = [
+    'runtime',
+    'dev',
+    'sdk',
+    'developer-tools',
+    'opencl'
+];
+const GFX_PATTERN = /^gfx[0-9a-f]{3,4}$/;
+const SUFFIX_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
+function parseGfx(input) {
+    const items = input
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => s.length > 0);
+    if (items.length === 0) {
+        throw new Error('Input "gfx" is empty. Use e.g. gfx1200 or "all".');
+    }
+    if (items.includes('all')) {
+        if (items.length > 1) {
+            throw new Error('Input "gfx": "all" cannot be combined with other targets.');
+        }
+        return [];
+    }
+    for (const item of items) {
+        if (!GFX_PATTERN.test(item)) {
+            throw new Error(`Invalid gfx target "${item}". Expected e.g. gfx1200.`);
+        }
+    }
+    return [...new Set(items)].sort();
+}
+function parseComponents(input) {
+    const items = input
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => s.length > 0);
+    if (items.length === 0) {
+        throw new Error('Input "components" is empty.');
+    }
+    for (const item of items) {
+        if (!COMPONENTS.includes(item)) {
+            throw new Error(`Invalid component "${item}". Allowed: ${COMPONENTS.join(', ')}.`);
+        }
+    }
+    return [...new Set(items)];
+}
+function parseBoolean(name, input) {
+    const value = input.trim().toLowerCase();
+    if (value === 'true')
+        return true;
+    if (value === 'false')
+        return false;
+    throw new Error(`Input "${name}" must be "true" or "false", got "${input}".`);
+}
+function parseInputs(raw) {
+    const version = formatVersion(assertSupported(raw.version || DEFAULT_VERSION));
+    const suffix = raw.logFileSuffix.trim() || 'log.txt';
+    if (!SUFFIX_PATTERN.test(suffix)) {
+        throw new Error(`Invalid log-file-suffix "${suffix}".`);
+    }
+    return {
+        version,
+        gfx: parseGfx(raw.gfx || 'all'),
+        components: parseComponents(raw.components || 'dev'),
+        useCache: parseBoolean('use-cache', raw.useCache || 'true'),
+        logFileSuffix: suffix
+    };
+}
+
+const SUPPORTED_DISTROS = {
+    ubuntu: ['22.04', '24.04', '26.04'],
+    debian: ['12', '13']
+};
+function parseOsRelease(text) {
+    const fields = new Map();
+    for (const line of text.split('\n')) {
+        const match = /^([A-Z_]+)=(.*)$/.exec(line.trim());
+        if (match) {
+            fields.set(match[1], match[2].replace(/^"|"$/g, ''));
+        }
+    }
+    return {
+        id: fields.get('ID') ?? '',
+        versionId: fields.get('VERSION_ID') ?? ''
+    };
+}
+/** Map os-release data to the apt repo distro name, e.g. ubuntu2404. */
+function distroName(release) {
+    const versions = SUPPORTED_DISTROS[release.id];
+    if (!versions || !versions.includes(release.versionId)) {
+        const supported = Object.entries(SUPPORTED_DISTROS)
+            .map(([id, v]) => `${id} ${v.join('/')}`)
+            .join(', ');
+        throw new Error(`Unsupported distribution "${release.id} ${release.versionId}". ` +
+            `Supported: ${supported}.`);
+    }
+    return `${release.id}${release.versionId.replace('.', '')}`;
+}
+function osFromNodePlatform(nodePlatform) {
+    if (nodePlatform === 'linux')
+        return 'linux';
+    if (nodePlatform === 'win32')
+        return 'windows';
+    throw new Error(`Unsupported operating system "${nodePlatform}". Use Linux or Windows.`);
+}
+function detectPlatform(nodePlatform, arch, readOsRelease) {
+    const os = osFromNodePlatform(nodePlatform);
+    if (os === 'windows')
+        return { os, arch, distro: '' };
+    return { os, arch, distro: distroName(parseOsRelease(readOsRelease())) };
+}
+
+function readRawInputs() {
+    return {
+        version: getInput('version'),
+        gfx: getInput('gfx'),
+        components: getInput('components'),
+        useCache: getInput('use-cache'),
+        logFileSuffix: getInput('log-file-suffix')
+    };
+}
+function makePlan(raw, platform) {
+    const inputs = parseInputs(raw);
+    const scheme = selectScheme(parseVersion(inputs.version));
+    return { inputs, platform, scheme };
+}
+async function run() {
+    try {
+        const platform = detectPlatform(process.platform, os$1.arch(), () => fs$1.readFileSync('/etc/os-release', 'utf8'));
+        const plan = makePlan(readRawInputs(), platform);
+        info(`Plan: ROCm ${plan.inputs.version} on ${plan.platform.os} ` +
+            `(${plan.scheme}, gfx: ${plan.inputs.gfx.join(',') || 'all'})`);
+        throw new Error('Install flows are not implemented yet.');
+    }
+    catch (error) {
+        setFailed(error instanceof Error ? error.message : String(error));
+    }
+}
+
+await run();
 //# sourceMappingURL=index.js.map
