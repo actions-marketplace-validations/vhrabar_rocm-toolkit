@@ -30427,6 +30427,14 @@ function error(message, properties = {}) {
     issueCommand('error', toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
 /**
+ * Adds a warning issue
+ * @param message warning issue message. Errors will be converted to string via toString()
+ * @param properties optional properties to add to the annotation.
+ */
+function warning(message, properties = {}) {
+    issueCommand('warning', toCommandProperties(properties), message instanceof Error ? message.toString() : message);
+}
+/**
  * Writes info to log with console.log.
  * @param message info message
  */
@@ -30450,10 +30458,9 @@ function endGroup() {
     issue('endgroup');
 }
 
-// Versions the action accepts. UNVERIFIED: confirm each entry against the real
-// repositories (see docs/RESEARCH.md) before relying on it.
+// Versions the action accepts.
 const MULTIARCH_VERSIONS = ['10.0.0', '10.1.0'];
-const LEGACY_VERSIONS = ['6.2.2', '7.0.1'];
+const LEGACY_VERSIONS = ['6.2.2', '7.0.1', '7.2.4'];
 const SUPPORTED_VERSIONS = [
     ...LEGACY_VERSIONS,
     ...MULTIARCH_VERSIONS
@@ -30471,7 +30478,7 @@ function parseVersion(input) {
         patch: Number(match[3])
     };
 }
-/** Legacy: <= 7.2.x. Multi-arch: >= 10. Anything in between is unsupported. */
+/** Legacy: <= 7.2.x. Multi-arch: >= 10. */
 function selectScheme(version) {
     if (version.major >= 10)
         return 'multiarch';
@@ -34059,6 +34066,97 @@ function _getGlobal(key, defaultValue) {
     return value !== undefined ? value : defaultValue;
 }
 
+const LEGACY_BASE = 'https://repo.radeon.com/amdgpu-install';
+/** Ubuntu repo path segment -> codename used by repo.radeon.com. */
+const CODENAMES = {
+    ubuntu2204: 'jammy',
+    ubuntu2404: 'noble'
+};
+const DEB_PATTERN = /amdgpu-install_[0-9][0-9A-Za-z.+~-]*_all\.deb/;
+/** Patch 0 has no patch part in the directory name: 7.2.0 -> 7.2. */
+function installerDir(version) {
+    const v = parseVersion(version);
+    return v.patch === 0
+        ? `${v.major}.${v.minor}`
+        : `${v.major}.${v.minor}.${v.patch}`;
+}
+function legacyPrefix(version) {
+    const v = parseVersion(version);
+    return `/opt/rocm-${v.major}.${v.minor}.${v.patch}`;
+}
+function codenameFor(distro) {
+    const codename = CODENAMES[distro];
+    if (!codename) {
+        throw new Error(`The legacy install flow (ROCm 7.2.x and older) supports Ubuntu 22.04 ` +
+            `and 24.04 only, not "${distro}".`);
+    }
+    return codename;
+}
+function listingUrl(version, codename) {
+    return `${LEGACY_BASE}/${installerDir(version)}/ubuntu/${codename}/`;
+}
+/**
+ * The .deb file name has a build number that cannot be derived from the
+ * version, so read it from the directory listing.
+ */
+function findInstallerDeb(listing) {
+    const match = DEB_PATTERN.exec(listing);
+    if (!match) {
+        throw new Error('Could not find an amdgpu-install package in the directory listing.');
+    }
+    return match[0];
+}
+const PACKAGES = {
+    runtime: 'rocm-hip-runtime',
+    dev: 'rocm-hip-runtime-dev',
+    sdk: 'rocm-hip-sdk',
+    'developer-tools': 'rocm-developer-tools',
+    opencl: 'rocm-opencl'
+};
+/**
+ * libxml2 is not declared by rocm-llvm, but its lld needs libxml2.so.2
+ */
+const EXTRA_PACKAGES = ['libxml2'];
+function legacyPackages(components) {
+    return [
+        ...new Set([...components.map((c) => PACKAGES[c]), ...EXTRA_PACKAGES])
+    ];
+}
+async function sudo$1(args) {
+    await exec('sudo', args);
+}
+/** Install ROCm 7.2.x and older from repo.radeon.com. Returns the prefix. */
+async function installLegacy(inputs, distro) {
+    const codename = codenameFor(distro);
+    if (inputs.gfx.length > 0) {
+        warning('Input "gfx" has no effect for ROCm 7.2.x and older; ' +
+            'these releases are not packaged per GPU architecture.');
+    }
+    const base = listingUrl(inputs.version, codename);
+    startGroup(`Find the amdgpu-install package for ROCm ${inputs.version}`);
+    const listingFile = await downloadTool(base);
+    const debName = findInstallerDeb(fs$1.readFileSync(listingFile, 'utf8'));
+    info(`Found ${debName}`);
+    endGroup();
+    const apt = ['env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get'];
+    startGroup('Configure the AMD ROCm apt repository');
+    const debFile = await downloadTool(`${base}${debName}`);
+    await sudo$1([...apt, 'install', '-y', debFile]);
+    await sudo$1([...apt, 'update']);
+    endGroup();
+    const packages = legacyPackages(inputs.components);
+    startGroup(`Install ${packages.join(' ')}`);
+    await sudo$1([...apt, 'install', '-y', '--no-install-recommends', ...packages]);
+    endGroup();
+    const prefix = legacyPrefix(inputs.version);
+    const hipcc = `${prefix}/bin/hipcc`;
+    if (!fs$1.existsSync(hipcc)) {
+        throw new Error(`Installation finished but ${hipcc} does not exist. ` +
+            `Include the "dev" or "sdk" component to get the compiler.`);
+    }
+    return prefix;
+}
+
 const REPO_BASE = 'https://stable.repo.amd.com/rocm/core/packages';
 const KEY_URL = 'https://stable.repo.amd.com/rocm/gpg/packages.gpg';
 /** Primary key fingerprint of the AMD package signing key (see docs/RESEARCH.md). */
@@ -34240,6 +34338,11 @@ async function run() {
             `(${plan.scheme}, gfx: ${plan.inputs.gfx.join(',') || 'all'})`);
         if (plan.platform.os === 'linux' && plan.scheme === 'multiarch') {
             const root = await installMultiArch(plan.inputs, plan.platform.distro);
+            applyEnv(buildEnv(root, 'linux'), 'linux', plan.inputs.version);
+            return;
+        }
+        if (plan.platform.os === 'linux' && plan.scheme === 'legacy') {
+            const root = await installLegacy(plan.inputs, plan.platform.distro);
             applyEnv(buildEnv(root, 'linux'), 'linux', plan.inputs.version);
             return;
         }

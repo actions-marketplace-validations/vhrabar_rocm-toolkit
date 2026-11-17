@@ -86,3 +86,34 @@ jobs:
           test -x "$ROCM_PATH/bin/hipcc"
           hipcc --version
           hipcc .github/smoke/hello.hip -o hello --offload-arch=gfx1200
+
+  install-legacy:
+    name: Install ROCm 7.2.4 on ${{ matrix.os }}
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Disk before
+        run: df -h /
+      - name: Install ROCm
+        id: rocm
+        uses: ./
+        with:
+          version: '7.2.4'
+      - name: Disk after
+        run: df -h /
+      - name: Check outputs and environment
+        run: |
+          echo "ROCM_PATH=$ROCM_PATH HIP_PATH=$HIP_PATH"
+          test "$ROCM_PATH" = "/opt/rocm-7.2.4"
+          test "${{ steps.rocm.outputs.ROCM_PATH }}" = "/opt/rocm-7.2.4"
+          test "${{ steps.rocm.outputs.version }}" = "7.2.4"
+          test -x "$ROCM_PATH/bin/hipcc"
+      - name: hipcc --version
+        run: hipcc --version
+      - name: Compile and link a HIP program (not run, no GPU)
+        run: hipcc .github/smoke/hello.hip -o hello --offload-arch=gfx1200

@@ -3,6 +3,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import { parseInputs, type Inputs } from './inputs.js'
 import { applyEnv, buildEnv } from './env.js'
+import { installLegacy } from './legacy.js'
 import { installMultiArch } from './linux.js'
 import { detectPlatform, type Platform } from './platform.js'
 import { parseVersion, selectScheme, type Scheme } from './versions.js'
@@ -49,6 +50,11 @@ export async function run(): Promise<void> {
     )
     if (plan.platform.os === 'linux' && plan.scheme === 'multiarch') {
       const root = await installMultiArch(plan.inputs, plan.platform.distro)
+      applyEnv(buildEnv(root, 'linux'), 'linux', plan.inputs.version)
+      return
+    }
+    if (plan.platform.os === 'linux' && plan.scheme === 'legacy') {
+      const root = await installLegacy(plan.inputs, plan.platform.distro)
       applyEnv(buildEnv(root, 'linux'), 'linux', plan.inputs.version)
       return
     }
