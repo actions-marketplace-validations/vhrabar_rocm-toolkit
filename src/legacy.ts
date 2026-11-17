@@ -2,6 +2,8 @@ import * as core from '@actions/core'
 import * as exec from '@actions/exec'
 import * as tc from '@actions/tool-cache'
 import * as fs from 'node:fs'
+import * as os from 'node:os'
+import * as path from 'node:path'
 import type { Component, Inputs } from './inputs.js'
 import { parseVersion } from './versions.js'
 
@@ -102,7 +104,10 @@ export async function installLegacy(
 
   const apt = ['env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get']
   core.startGroup('Configure the AMD ROCm apt repository')
-  const debFile = await tc.downloadTool(`${base}${debName}`)
+  const debFile = await tc.downloadTool(
+    `${base}${debName}`,
+    path.join(process.env['RUNNER_TEMP'] ?? os.tmpdir(), debName)
+  )
   await sudo([...apt, 'install', '-y', debFile])
   await sudo([...apt, 'update'])
   core.endGroup()

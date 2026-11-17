@@ -9,7 +9,9 @@ const core = {
 const execMock = {
   exec: jest.fn<(cmd: string, args?: string[]) => Promise<number>>()
 }
-const tc = { downloadTool: jest.fn<(url: string) => Promise<string>>() }
+const tc = {
+  downloadTool: jest.fn<(url: string, dest?: string) => Promise<string>>()
+}
 const fsMock = {
   readFileSync: jest.fn<(p: string, enc: string) => string>(),
   existsSync: jest.fn<(p: string) => boolean>()
@@ -115,8 +117,9 @@ describe('installLegacy', () => {
   }
 
   beforeEach(() => {
-    tc.downloadTool.mockImplementation(async (url) =>
-      url.endsWith('.deb') ? '/tmp/agi.deb' : '/tmp/listing.html'
+    process.env['RUNNER_TEMP'] = '/tmp'
+    tc.downloadTool.mockImplementation(async (url, dest) =>
+      url.endsWith('.deb') ? (dest as string) : '/tmp/listing.html'
     )
     fsMock.readFileSync.mockReturnValue(LISTING)
     execMock.exec.mockResolvedValue(0)
@@ -126,14 +129,16 @@ describe('installLegacy', () => {
   it('installs the repo package, then the ROCm packages', async () => {
     const prefix = await legacy.installLegacy(inputs, 'ubuntu2404')
     expect(prefix).toBe('/opt/rocm-7.2.4')
+    const debPath = '/tmp/amdgpu-install_7.2.4.70204-1_all.deb'
     expect(tc.downloadTool).toHaveBeenCalledWith(
       'https://repo.radeon.com/amdgpu-install/7.2.4/ubuntu/noble/' +
-        'amdgpu-install_7.2.4.70204-1_all.deb'
+        'amdgpu-install_7.2.4.70204-1_all.deb',
+      debPath
     )
     const calls = execMock.exec.mock.calls.map(([c, a]) => [c, ...(a ?? [])])
     const apt = ['sudo', 'env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get']
     expect(calls).toEqual([
-      [...apt, 'install', '-y', '/tmp/agi.deb'],
+      [...apt, 'install', '-y', debPath],
       [...apt, 'update'],
       [
         ...apt,

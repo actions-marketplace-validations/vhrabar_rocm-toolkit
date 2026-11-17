@@ -34140,7 +34140,7 @@ async function installLegacy(inputs, distro) {
     endGroup();
     const apt = ['env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get'];
     startGroup('Configure the AMD ROCm apt repository');
-    const debFile = await downloadTool(`${base}${debName}`);
+    const debFile = await downloadTool(`${base}${debName}`, path$1.join(process.env['RUNNER_TEMP'] ?? os$1.tmpdir(), debName));
     await sudo$1([...apt, 'install', '-y', debFile]);
     await sudo$1([...apt, 'update']);
     endGroup();
