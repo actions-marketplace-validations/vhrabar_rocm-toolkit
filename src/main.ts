@@ -5,6 +5,7 @@ import { parseInputs, type Inputs } from './inputs.js'
 import { applyEnv, buildEnv } from './env.js'
 import { installLegacy } from './legacy.js'
 import { installMultiArch } from './linux.js'
+import { installWindows } from './windows.js'
 import { detectPlatform, type Platform } from './platform.js'
 import { parseVersion, selectScheme, type Scheme } from './versions.js'
 
@@ -58,9 +59,18 @@ export async function run(): Promise<void> {
       applyEnv(buildEnv(root, 'linux'), 'linux', plan.inputs.version)
       return
     }
-    throw new Error(
-      `No install flow for ${plan.platform.os} / ${plan.scheme} yet.`
-    )
+    if (plan.platform.os === 'windows') {
+      if (plan.scheme !== 'multiarch') {
+        throw new Error(
+          `ROCm ${plan.inputs.version} is not available on Windows through ` +
+            `this action. Windows supports ROCm 10.x only.`
+        )
+      }
+      const root = await installWindows(plan.inputs)
+      applyEnv(buildEnv(root, 'windows'), 'windows', plan.inputs.version)
+      return
+    }
+    throw new Error(`No install flow for ${plan.platform.os} / ${plan.scheme}.`)
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error))
   }

@@ -13,14 +13,27 @@ endif()
 list(GET CMAKE_PREFIX_PATH 0 ROCM_ROOT)
 
 # Use the ROCm compiler (avoid installing other compilers into runner)
-set(CMAKE_C_COMPILER "${ROCM_ROOT}/bin/amdclang" CACHE FILEPATH "")
-set(CMAKE_CXX_COMPILER "${ROCM_ROOT}/bin/amdclang++" CACHE FILEPATH "")
-set(CMAKE_HIP_COMPILER "${ROCM_ROOT}/bin/amdclang++" CACHE FILEPATH "")
+find_program(ROCM_CLANG NAMES amdclang
+  HINTS "${ROCM_ROOT}/bin" "${ROCM_ROOT}/lib/llvm/bin" NO_DEFAULT_PATH)
+find_program(ROCM_CLANGXX NAMES amdclang++
+  HINTS "${ROCM_ROOT}/bin" "${ROCM_ROOT}/lib/llvm/bin" NO_DEFAULT_PATH)
+if(NOT ROCM_CLANG OR NOT ROCM_CLANGXX)
+  message(FATAL_ERROR "amdclang / amdclang++ not found under ${ROCM_ROOT}")
+endif()
+set(CMAKE_C_COMPILER "${ROCM_CLANG}" CACHE FILEPATH "")
+set(CMAKE_CXX_COMPILER "${ROCM_CLANGXX}" CACHE FILEPATH "")
+set(CMAKE_HIP_COMPILER "${ROCM_CLANGXX}" CACHE FILEPATH "")
 set(CMAKE_HIP_ARCHITECTURES "${SMOKE_GFX}" CACHE STRING "")
 
 # set GPU target explicitly, as runner has no GPU to detect
 set(GPU_TARGETS "${SMOKE_GFX}" CACHE STRING "")
 set(AMDGPU_TARGETS "${SMOKE_GFX}" CACHE STRING "")
+
+# rocPRIM, hipCUB and rocThrust need C++17.
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_HIP_STANDARD 17)
+set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
 project(rocm_smoke LANGUAGES CXX HIP)
 

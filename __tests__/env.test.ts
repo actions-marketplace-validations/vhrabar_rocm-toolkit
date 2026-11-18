@@ -23,6 +23,15 @@ describe('buildEnv', () => {
     const env = buildEnv('C:\\Program Files\\AMD\\ROCm\\6.2', 'windows')
     expect(env.binDir).toBe('C:\\Program Files\\AMD\\ROCm\\6.2\\bin')
   })
+
+  it('adds the device library path on windows only', () => {
+    expect(buildEnv('C:\\rocm\\core-10.1', 'windows').deviceLibPath).toBe(
+      'C:\\rocm\\core-10.1\\lib\\llvm\\amdgcn\\bitcode'
+    )
+    expect(
+      buildEnv('/opt/rocm/core-10.1', 'linux').deviceLibPath
+    ).toBeUndefined()
+  })
 })
 
 describe('mergeLibraryPath', () => {
@@ -46,6 +55,23 @@ describe('applyEnv', () => {
       expect.stringContaining('/opt/rocm/lib')
     )
     expect(core.setOutput).toHaveBeenCalledWith('version', '10.1.0')
+  })
+
+  it('exports HIP_DEVICE_LIB_PATH on windows', () => {
+    applyEnv(buildEnv('C:\\r', 'windows'), 'windows', '10.1.0')
+    expect(core.exportVariable).toHaveBeenCalledWith(
+      'HIP_DEVICE_LIB_PATH',
+      'C:\\r\\lib\\llvm\\amdgcn\\bitcode'
+    )
+  })
+
+  it('does not export HIP_DEVICE_LIB_PATH on linux', () => {
+    core.exportVariable.mockClear()
+    applyEnv(buildEnv('/opt/rocm/core-10.1', 'linux'), 'linux', '10.1.0')
+    expect(core.exportVariable).not.toHaveBeenCalledWith(
+      'HIP_DEVICE_LIB_PATH',
+      expect.anything()
+    )
   })
 
   it('does not set LD_LIBRARY_PATH on windows', () => {

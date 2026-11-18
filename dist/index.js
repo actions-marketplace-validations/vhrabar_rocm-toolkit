@@ -40,6 +40,9 @@ import * as fs$1 from 'node:fs';
 import * as os$1 from 'node:os';
 import * as path$1 from 'node:path';
 import * as stream from 'stream';
+import { spawn } from 'node:child_process';
+import * as https$1 from 'node:https';
+import { pipeline } from 'node:stream/promises';
 
 // We use any as a valid input type
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -30571,13 +30574,17 @@ function parseInputs(raw) {
 }
 
 function buildEnv(root, os) {
-    const p = path$1.posix;
-    return {
+    const p = os === 'windows' ? path$1.win32 : path$1.posix;
+    const env = {
         rocmPath: root,
         hipPath: root,
         binDir: p.join(root, 'bin'),
         libDir: p.join(root, 'lib')
     };
+    if (os === 'windows') {
+        env.deviceLibPath = p.join(root, 'lib', 'llvm', 'amdgcn', 'bitcode');
+    }
+    return env;
 }
 /** Prepend libDir to an existing LD_LIBRARY_PATH value without duplicates. */
 function mergeLibraryPath(libDir, existing) {
@@ -30587,8 +30594,11 @@ function mergeLibraryPath(libDir, existing) {
 function applyEnv(env, os, version) {
     exportVariable('ROCM_PATH', env.rocmPath);
     exportVariable('HIP_PATH', env.hipPath);
+    if (env.deviceLibPath) {
+        exportVariable('HIP_DEVICE_LIB_PATH', env.deviceLibPath);
+    }
     addPath(env.binDir);
-    {
+    if (os === 'linux') {
         exportVariable('LD_LIBRARY_PATH', mergeLibraryPath(env.libDir, process.env['LD_LIBRARY_PATH']));
     }
     setOutput('ROCM_PATH', env.rocmPath);
@@ -34270,6 +34280,142 @@ async function installMultiArch(inputs, distro) {
     return prefix;
 }
 
+const TARBALL_BASE = 'https://stable.repo.amd.com/rocm/core/tarball';
+const MARKER_FILE = '.setup-rocm';
+/**
+ * GPU target -> tarball family, Linux-only targets are not listed.
+ */
+const FAMILIES = {
+    gfx1010: 'gfx101X-dgpu',
+    gfx1011: 'gfx101X-dgpu',
+    gfx1012: 'gfx101X-dgpu',
+    gfx1030: 'gfx103X-all',
+    gfx1031: 'gfx103X-all',
+    gfx1032: 'gfx103X-all',
+    gfx1033: 'gfx103X-all',
+    gfx1034: 'gfx103X-all',
+    gfx1035: 'gfx103X-all',
+    gfx1036: 'gfx103X-all',
+    gfx1100: 'gfx110X-all',
+    gfx1101: 'gfx110X-all',
+    gfx1102: 'gfx110X-all',
+    gfx1103: 'gfx110X-all',
+    gfx1150: 'gfx1150',
+    gfx1151: 'gfx1151',
+    gfx1152: 'gfx1152',
+    gfx1153: 'gfx1153',
+    gfx1200: 'gfx120X-all',
+    gfx1201: 'gfx120X-all',
+    gfx908: 'gfx908',
+    gfx90a: 'gfx90a'
+};
+const MULTIARCH_FAMILY = 'multiarch';
+/**
+ * One family -> that tarball. No target ("all") or several families -> m-arch
+ */
+function windowsFamily(gfx) {
+    if (gfx.length === 0)
+        return MULTIARCH_FAMILY;
+    const families = new Set();
+    for (const target of gfx) {
+        const family = FAMILIES[target];
+        if (!family) {
+            throw new Error(`There is no Windows build for GPU target "${target}". ` +
+                `Supported targets: ${Object.keys(FAMILIES).join(', ')}.`);
+        }
+        families.add(family);
+    }
+    return families.size === 1 ? [...families][0] : MULTIARCH_FAMILY;
+}
+function tarballUrl(version, family) {
+    return `${TARBALL_BASE}/therock-dist-windows-${family}-${version}.tar.gz`;
+}
+/** C:\rocm\core-v */
+function windowsPrefix(version, drive = 'C:') {
+    const v = parseVersion(version);
+    return `${drive}\\rocm\\core-${v.major}.${v.minor}`;
+}
+function httpGet(url, redirects = 3) {
+    return new Promise((resolve, reject) => {
+        const request = https$1.get(url, (res) => {
+            const status = res.statusCode ?? 0;
+            if (status >= 300 && status < 400 && res.headers.location) {
+                res.resume();
+                if (redirects === 0) {
+                    reject(new Error(`Too many redirects downloading ${url}`));
+                    return;
+                }
+                resolve(httpGet(new URL(res.headers.location, url).toString(), redirects - 1));
+                return;
+            }
+            if (status !== 200) {
+                res.resume();
+                reject(new Error(`Download failed: HTTP ${status} for ${url}`));
+                return;
+            }
+            res.setTimeout(120_000, () => res.destroy(new Error(`Download stalled: no data for 120 s (${url})`)));
+            resolve(res);
+        });
+        request.on('error', reject);
+    });
+}
+const defaultFetcher = {
+    get: httpGet,
+    spawnTar(args) {
+        const tar = path$1.win32.join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32', 'tar.exe');
+        const child = spawn(tar, args, { stdio: ['pipe', 'inherit', 'inherit'] });
+        const done = new Promise((resolve, reject) => {
+            child.on('error', reject);
+            child.on('close', (code) => code === 0
+                ? resolve()
+                : reject(new Error(`tar exited with code ${code}`)));
+        });
+        return { stdin: child.stdin, done };
+    }
+};
+/** Stream the download straight into tar */
+async function downloadAndExtract(url, dest, fetcher = defaultFetcher) {
+    const body = await fetcher.get(url);
+    const tar = fetcher.spawnTar(['-xzf', '-', '-C', dest]);
+    await Promise.all([pipeline(body, tar.stdin), tar.done]);
+}
+/** Install the ROCm 10.x tarball on Windows. Returns the install prefix. */
+async function installWindows(inputs, fetcher = defaultFetcher) {
+    const family = windowsFamily(inputs.gfx);
+    const prefix = windowsPrefix(inputs.version, process.env['SystemDrive']);
+    const hipcc = path$1.win32.join(prefix, 'bin', 'hipcc.exe');
+    const marker = path$1.win32.join(prefix, MARKER_FILE);
+    const stamp = `${family} ${inputs.version}`;
+    if (inputs.components.some((c) => c !== 'dev')) {
+        warning('Input "components" has no effect on Windows; the tarball is installed ' +
+            'whole.');
+    }
+    const upToDate = fs$1.existsSync(hipcc) &&
+        fs$1.existsSync(marker) &&
+        fs$1.readFileSync(marker, 'utf8').trim() === stamp;
+    if (upToDate) {
+        info(`ROCm ${stamp} is already installed in ${prefix}`);
+        return prefix;
+    }
+    if (fs$1.existsSync(prefix)) {
+        info(`Removing the previous install in ${prefix}`);
+        fs$1.rmSync(prefix, { recursive: true, force: true });
+    }
+    fs$1.mkdirSync(prefix, { recursive: true });
+    const url = tarballUrl(inputs.version, family);
+    startGroup(`Download and extract ${url}`);
+    const started = Date.now();
+    await downloadAndExtract(url, prefix, fetcher);
+    info(`Done in ${Math.round((Date.now() - started) / 1000)} s`);
+    endGroup();
+    if (!fs$1.existsSync(hipcc)) {
+        throw new Error(`Extraction finished but ${hipcc} does not exist. ` +
+            `The tarball layout may have changed.`);
+    }
+    fs$1.writeFileSync(marker, `${stamp}\n`);
+    return prefix;
+}
+
 const SUPPORTED_DISTROS = {
     ubuntu: ['22.04', '24.04', '26.04'],
     debian: ['12', '13']
@@ -34346,7 +34492,16 @@ async function run() {
             applyEnv(buildEnv(root, 'linux'), 'linux', plan.inputs.version);
             return;
         }
-        throw new Error(`No install flow for ${plan.platform.os} / ${plan.scheme} yet.`);
+        if (plan.platform.os === 'windows') {
+            if (plan.scheme !== 'multiarch') {
+                throw new Error(`ROCm ${plan.inputs.version} is not available on Windows through ` +
+                    `this action. Windows supports ROCm 10.x only.`);
+            }
+            const root = await installWindows(plan.inputs);
+            applyEnv(buildEnv(root, 'windows'), 'windows', plan.inputs.version);
+            return;
+        }
+        throw new Error(`No install flow for ${plan.platform.os} / ${plan.scheme}.`);
     }
     catch (error) {
         setFailed(error instanceof Error ? error.message : String(error));

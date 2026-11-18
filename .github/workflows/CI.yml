@@ -17,8 +17,8 @@ jobs:
     name: Format, lint, typecheck, test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -37,7 +37,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04]
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
       - name: Disk before
         run: df -h /
       - name: Install ROCm
@@ -71,7 +71,7 @@ jobs:
     needs: check
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
       - name: Install ROCm (first run)
         id: first
         uses: ./
@@ -101,7 +101,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04]
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
       - name: Disk before
         run: df -h /
       - name: Install ROCm
@@ -125,4 +125,45 @@ jobs:
       - name: Build the smoke tests with CMake (libraries are optional here)
         run: |
           cmake -S .github/smoke -B build -DCMAKE_PREFIX_PATH="$ROCM_PATH"
+          cmake --build build
+
+  install-windows:
+    name: Install on ${{ matrix.os }}
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Disk before
+        run: Get-PSDrive C | Format-Table Name, Used, Free
+      - name: Install ROCm
+        id: rocm
+        uses: ./
+        with:
+          version: '10.1.0'
+          gfx: gfx1200
+      - name: Disk after
+        run: Get-PSDrive C | Format-Table Name, Used, Free
+      - name: Check outputs and environment
+        run: |
+          "ROCM_PATH=$env:ROCM_PATH"
+          "HIP_PATH=$env:HIP_PATH"
+          "HIP_DEVICE_LIB_PATH=$env:HIP_DEVICE_LIB_PATH"
+          if ($env:ROCM_PATH -ne 'C:\rocm\core-10.1') { throw "ROCM_PATH is $env:ROCM_PATH" }
+          if ($env:HIP_PATH -ne $env:ROCM_PATH) { throw "HIP_PATH is $env:HIP_PATH" }
+          if (-not (Test-Path "$env:HIP_DEVICE_LIB_PATH\ocml.bc")) { throw 'device libraries not found' }
+          if ('${{ steps.rocm.outputs.ROCM_PATH }}' -ne $env:ROCM_PATH) { throw 'ROCM_PATH output differs' }
+          if ('${{ steps.rocm.outputs.version }}' -ne '10.1.0') { throw 'version output differs' }
+          if (-not (Test-Path "$env:ROCM_PATH\bin\hipcc.exe")) { throw 'hipcc.exe missing' }
+      - name: hipcc --version
+        run: hipcc --version
+      - name: Compile and link a HIP program
+        run: hipcc .github/smoke/hello.hip -o hello.exe --offload-arch=gfx1200
+      - name: Build the library smoke tests with CMake
+        run: |
+          cmake -S .github/smoke -B build -G Ninja `
+            -DCMAKE_PREFIX_PATH="$env:ROCM_PATH" -DSMOKE_REQUIRE_LIBS=ON
           cmake --build build

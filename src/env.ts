@@ -7,16 +7,25 @@ export interface RocmEnv {
   hipPath: string
   binDir: string
   libDir: string
+  /**
+   * Windows only. With ROCM_PATH set to the tarball root, clang cannot find the
+   * device libraries on its own.
+   */
+  deviceLibPath?: string
 }
 
 export function buildEnv(root: string, os: Os): RocmEnv {
   const p = os === 'windows' ? path.win32 : path.posix
-  return {
+  const env: RocmEnv = {
     rocmPath: root,
     hipPath: root,
     binDir: p.join(root, 'bin'),
     libDir: p.join(root, 'lib')
   }
+  if (os === 'windows') {
+    env.deviceLibPath = p.join(root, 'lib', 'llvm', 'amdgcn', 'bitcode')
+  }
+  return env
 }
 
 /** Prepend libDir to an existing LD_LIBRARY_PATH value without duplicates. */
@@ -31,6 +40,9 @@ export function mergeLibraryPath(
 export function applyEnv(env: RocmEnv, os: Os, version: string): void {
   core.exportVariable('ROCM_PATH', env.rocmPath)
   core.exportVariable('HIP_PATH', env.hipPath)
+  if (env.deviceLibPath) {
+    core.exportVariable('HIP_DEVICE_LIB_PATH', env.deviceLibPath)
+  }
   core.addPath(env.binDir)
   if (os === 'linux') {
     core.exportVariable(

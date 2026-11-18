@@ -6,6 +6,9 @@ const core = {
   setFailed: jest.fn()
 }
 jest.unstable_mockModule('@actions/core', () => core)
+jest.unstable_mockModule('../src/windows.js', () => ({
+  installWindows: jest.fn()
+}))
 jest.unstable_mockModule('../src/legacy.js', () => ({
   installLegacy: jest.fn()
 }))
