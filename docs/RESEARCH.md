@@ -1,0 +1,106 @@
+# Research notes
+
+## Linux: ROCm 10.x multi-arch apt repo
+
+### Verified
+
+| Fact                                             | Value                                                                                                                                                                                                 | src                                                                                                                 |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Repo base                                        | `https://stable.repo.amd.com/rocm/core/packages/<distro>/`                                                                                                                                            | HTTP 200 on the directory listing                                                                                   |
+| Distros listed                                   | `debian12`, `debian13`, `ubuntu2204`, `ubuntu2404`, `ubuntu2604` (also rhel/sles/azl, out of scope)                                                                                                   | directory index at `.../rocm/core/packages/`                                                                        |
+| `Suites`                                         | `stable`                                                                                                                                                                                              | `dists/stable/Release` returns 200; `Suite: stable`, `Codename: stable` inside it                                   |
+| `Components`                                     | `main`                                                                                                                                                                                                | `Components: main` in that Release file                                                                             |
+| `Architectures`                                  | `amd64` only                                                                                                                                                                                          | `Architectures: amd64` in that Release file                                                                         |
+| Signing key URL                                  | `https://stable.repo.amd.com/rocm/gpg/packages.gpg`                                                                                                                                                   | downloaded; imported into a throwaway keyring; `gpg --verify` of `dists/stable/InRelease` reported a good signature |
+| Key identity                                     | AMD MLSE DevOps; primary `D0F004A0025A1145C7807FCD0701EAC4D5E02107`, signing subkey `C367239A86C9B62AF49C921EFA296B056C5BB456`                                                                        | `gpg --show-keys` on the downloaded file; the subkey ID matches the issuer in `Release.gpg`                         |
+| Key format                                       | ASCII-armored. Needs `gpg --dearmor` to be used as `/etc/apt/keyrings/amdrocm.gpg`                                                                                                                    | `file` reports "PGP public key block"                                                                               |
+| Versions in the index                            | `10.0` and `10.1`, full version `10.1.0-3`                                                                                                                                                            | `Packages` index                                                                                                    |
+| Versioned package names carry `MAJOR.MINOR` only | e.g. `amdrocm-core-dev10.1-gfx1200`                                                                                                                                                                   | `Packages` index                                                                                                    |
+| Package names                                    | `amdrocm10.1-gfx1200` (runtime), `amdrocm-core-dev10.1-gfx1200`, `amdrocm-core-sdk10.1-gfx1200`, `amdrocm-developer-tools10.1`, `amdrocm-opencl10.1`                                                  | all present in `Packages`                                                                                           |
+| Valid gfx targets                                | `gfx1010 gfx1011 gfx1012 gfx1030 gfx1031 gfx1032 gfx1033 gfx1034 gfx1035 gfx1036 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1200 gfx1201 gfx1250 gfx908 gfx90a gfx942 gfx950` | distinct `-gfx*` suffixes in `Packages`                                                                             |
+| Install prefix                                   | `/opt/rocm/core-<MAJOR.MINOR>` (a versioned directory, not plain `/opt/rocm`)                                                                                                                         | `dpkg -c` of `amdrocm-base10.1`, `amdrocm-runtime-dev10.1`, `amdrocm-llvm10.1`                                      |
+| `hipcc` location                                 | `/opt/rocm/core-10.1/bin/hipcc` (shipped by `amdrocm-llvm10.1`, pulled in through `amdrocm-core10.1-<gfx>`)                                                                                           | `dpkg -c` of `amdrocm-llvm10.1`                                                                                     |
+| `core-dev` pulls the compiler                    | `amdrocm-core-dev<ver>-<gfx>` depends on `amdrocm-core<ver>-<gfx>`, which depends on `amdrocm-llvm<ver>`                                                                                              | `Depends:` fields in `Packages`                                                                                     |
+| Linux installers also exist                      | `https://stable.repo.amd.com/rocm/core/linux-installers/` lists `rocm-installer-10.0.0-4.run`, `rocm-installer-10.1.0-5.run`                                                                          | directory listing (not used by the action)                                                                          |
+
+### Verified by CI
+
+| Fact                                                                     | Result                                                                                                      |
+| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `apt-get install amdrocm-core-dev10.1-gfx1200` succeeds                  | yes, on `ubuntu-22.04` and `ubuntu-24.04`                                                                   |
+| `hipcc --version` works and a HIP program compiles for gfx1200 (not run) | yes, on both                                                                                                |
+| Disk used by that install                                                | about 10 GB (59 -> 69 GB used of 145 GB); no cleanup step needed                                            |
+| Time                                                                     | about 1.5 to 2.5 minutes per job                                                                            |
+| `ubuntu2204` index                                                       | same package names as `ubuntu2404` for `amdrocm10.1-gfx1200` and `amdrocm-core-dev10.1-gfx1200`             |
+| Side effect                                                              | the packages run `update-alternatives`, which registers `/opt/rocm/core-10.1/bin/hipcc` as `/usr/bin/hipcc` |
+
+### Verified
+
+| Fact                                                     | Value                                                                                                                                                                                                       | src                                                                    |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Directory layout                                         | `https://repo.radeon.com/amdgpu-install/<dir>/ubuntu/<codename>/`                                                                                                                                           | directory listings                                                     |
+| Version directories exist                                | `6.2.2`, `7.0.1`, `7.0.2`, `7.0.3`, `7.1`, `7.1.1`, `7.2`, `7.2.1`, `7.2.2`, `7.2.3`, `7.2.4` (and many older ones)                                                                                         | listing of `amdgpu-install/`                                           |
+| Patch 0 has no patch part in the directory               | ROCm 7.2.0 is in `7.2/`, not `7.2.0/`                                                                                                                                                                       | listing; `7.2/ubuntu/noble` holds `amdgpu-install_7.2.70200-1_all.deb` |
+| Codenames                                                | `6.2.2`: `focal`, `jammy`, `noble`; `7.0.1` to `7.2.4`: `jammy`, `noble`; `latest/`: `jammy`, `noble`, `resolute`                                                                                           | listings                                                               |
+| The `.deb` file name cannot be computed from the version | `6.2.2` -> `amdgpu-install_6.2.60202-1_all.deb`; `7.0.1` -> `..._7.0.1.70001-1_all.deb`; `7.2` -> `..._7.2.70200-1_all.deb`; `7.2.1` -> `..._7.2.1.70201-1_all.deb`; `7.2.4` -> `..._7.2.4.70204-1_all.deb` | per-directory listings. The file must be discovered from the listing.  |
+| Installer package contents                               | `/usr/bin/amdgpu-install`, `rocm.list`, `amdgpu.list`, `/etc/apt/keyrings/rocm.gpg`, and the pin file `/etc/apt/preferences.d/repo-radeon-pin-600`                                                          | `dpkg-deb -x` of the 7.2.4 `noble` package (16.9 KB). Never installed. |
+| Repos it configures                                      | `https://repo.radeon.com/rocm/apt/<ver> <codename> main` and `https://repo.radeon.com/graphics/<ver>/ubuntu <codename> main`                                                                                | `rocm.list` inside that package                                        |
+| Usecases                                                 | `hip` -> `rocm-hip-runtime`; `hiplibsdk` -> `rocm-hip-sdk`; `rocmdev` -> `rocm-dev`; `rocm` -> `rocm`; `lrt` -> `rocm-language-runtime`; `dkms` and `graphics` are separate                                 | `usecase_usage` and `USECASE_*` in `amdgpu-install`                    |
+| Default usecase when none is given                       | `dkms,graphics,opencl,hip`                                                                                                                                                                                  | same script                                                            |
+| `--no-dkms`                                              | skips the kernel driver; combining it with `--usecase=dkms` is an error                                                                                                                                     | `check_options` in the script                                          |
+| `hipcc` is not in the `hip` usecase                      | `rocm-hip-runtime` depends on `rocm-core rocm-language-runtime rocminfo hip-runtime-amd` only. `hipcc` arrives through `rocm-hip-runtime-dev` (pulled by `rocm-hip-sdk`) or `rocm-dev`                      | `Depends:` in the 7.2.4 `noble` `Packages` index                       |
+| Legacy install prefix                                    | `/opt/rocm-<version>` (e.g. `/opt/rocm-7.2.4/bin/hipcc`); `rocm-core`'s postinst points `/opt/rocm` at it with `update-alternatives`                                                                        | `dpkg -c` of `hipcc` and `rocm-core`; postinst                         |
+| Legacy versions have no per-gfx packages                 | package names are not suffixed with a gfx target                                                                                                                                                            | 7.2.4 `Packages` index                                                 |
+
+### Tried in Docker (local, `linux/amd64`, ROCm 7.2.4)
+
+Install the `amdgpu-install` package, then `apt-get install -y --no-install-recommends rocm-hip-runtime-dev`.
+
+| Fact                                              | `ubuntu:24.04` (noble)                                                               | `ubuntu:22.04` (jammy) |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------- |
+| `amdgpu-install` file discovered from the listing | `amdgpu-install_7.2.4.70204-1_all.deb`                                               | same                   |
+| `rocm-hip-runtime-dev` install time               | 47 s                                                                                 | 38 s                   |
+| Disk added                                        | about 2.6 GB                                                                         | about 2.7 GB           |
+| DKMS or kernel packages installed                 | none                                                                                 | none                   |
+| `hipcc`                                           | `/opt/rocm-7.2.4/bin/hipcc`, also `/usr/bin/hipcc`; `/opt/rocm` -> `/opt/rocm-7.2.4` | same                   |
+| HIP smoke test for gfx1200                        | compiles, but only after `apt-get install libxml2`                                   | same                   |
+
+`rocm-llvm` (7.2.4) declares no dependency or recommendation on `libxml2`, but `/opt/rocm-7.2.4/lib/llvm/bin/lld` needs `libxml2.so.2`, which the bare Ubuntu
+image lacks. The action installs `libxml2` explicitly.
+
+## Windows: ROCm 10.x tarball
+
+### Verified
+
+| Fact                            | Value                                                                                                                                                                            | How verified                                                                                          |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Tarballs exist for Windows      | `https://stable.repo.amd.com/rocm/core/tarball/therock-dist-windows-<family>-<version>.tar.gz`                                                                                   | the page builds its list in JavaScript; the `files` array in its script lists every file name         |
+| URLs are public                 | HTTP 200 without credentials, `content-type: binary/octet-stream`                                                                                                                | `curl -I` on four files                                                                               |
+| Versions                        | `10.0.0` and `10.1.0` (same as the Linux repo)                                                                                                                                   | file list                                                                                             |
+| Windows families                | `gfx101X-dgpu`, `gfx103X-all`, `gfx110X-all`, `gfx1150`, `gfx1151`, `gfx1152`, `gfx1153`, `gfx120X-all`, `gfx908`, `gfx90a`, `multiarch`                                         | file list (the Linux list also has `gfx94X-dcgpu`, `gfx950-dcgpu`, `gfx125X-dcgpu`; Windows does not) |
+| `-tests` variants also exist    | `therock-dist-windows-<family>-tests-<version>.tar.gz` (3.9 GB for `gfx120X-all`)                                                                                                | file list; not used                                                                                   |
+| Sizes (10.1.0)                  | `gfx120X-all` 2.1 GB, `gfx110X-all` 2.1 GB, `multiarch` 4.5 GB; about 9.0 GB unpacked for `gfx120X-all`                                                                          | `Content-Length`; `tar tzvf` of `gfx120X-all`                                                         |
+| No installer, no admin          | it is a plain `.tar.gz`                                                                                                                                                          | file type                                                                                             |
+| Layout has no wrapper directory | `bin/`, `lib/`, `include/`, `share/`, `cmake/`, `libexec/`, `.kpack/`, `.info/` at the archive root, so the extraction directory is the ROCm root                                | `tar tzvf` of `gfx120X-all` (12,458 entries)                                                          |
+| Compiler driver                 | `bin/hipcc.exe` and `bin/hipcc.bat`                                                                                                                                              | same listing                                                                                          |
+| LLVM compilers                  | `lib/llvm/bin/amdclang++.exe`, `amdclang.exe`, `clang++.exe`, `amdlld.exe`                                                                                                       | same listing                                                                                          |
+| Libraries are included          | DLLs in `bin/` and CMake packages in `lib/cmake/` for rocBLAS, rocFFT, rocRAND, rocSPARSE, rocSOLVER, hipBLAS, hipFFT, hipRAND, hipSPARSE, hipSOLVER, hipCUB, rocPRIM, rocThrust | same listing                                                                                          |
+| What a family contains          | rocBLAS library files in `gfx120X-all` name only `gfx1200` and `gfx1201`                                                                                                         | file names in the listing                                                                             |
+
+| gfx targets                                | family                      |
+| ------------------------------------------ | --------------------------- |
+| `gfx1010`, `gfx1011`, `gfx1012`            | `gfx101X-dgpu`              |
+| `gfx1030` to `gfx1036`                     | `gfx103X-all`               |
+| `gfx1100` to `gfx1103`                     | `gfx110X-all`               |
+| `gfx1150`, `gfx1151`, `gfx1152`, `gfx1153` | the family of the same name |
+| `gfx1200`, `gfx1201`                       | `gfx120X-all`               |
+| `gfx908`, `gfx90a`                         | the family of the same name |
+
+### Verified by CI on hosted runners
+
+| Runner         | Install step | HIP compile | CMake smoke build | Free disk before -> after |
+| -------------- | ------------ | ----------- | ----------------- | ------------------------- |
+| `windows-2022` | 83 s         | 18 s        | 16 s              | 77.6 -> 68.6 GB           |
+| `windows-2025` | 91 s         | 7 s         | 24 s              | 28.1 -> 19.2 GB           |
+| `ubuntu-24.04` | 59 s         | 2 s         | 21 s              | 86 -> 76 GB               |
+| `ubuntu-26.04` | 55 s         | 2 s         | 26 s              | 88 -> 78 GB               |

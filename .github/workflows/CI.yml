@@ -1,0 +1,224 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Format, lint, typecheck, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+
+  install-linux:
+    name: Install on ${{ matrix.os }}
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-26.04]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Disk before
+        run: df -h /
+      - name: Install ROCm
+        id: rocm
+        uses: ./
+        with:
+          version: '10.1.0'
+          gfx: gfx1200
+      - name: Disk after
+        run: df -h /
+      - name: Check outputs and environment
+        run: |
+          echo "ROCM_PATH=$ROCM_PATH HIP_PATH=$HIP_PATH"
+          echo "output ROCM_PATH=${{ steps.rocm.outputs.ROCM_PATH }}"
+          echo "output version=${{ steps.rocm.outputs.version }}"
+          test -d "$ROCM_PATH"
+          test "$ROCM_PATH" = "${{ steps.rocm.outputs.ROCM_PATH }}"
+          test "${{ steps.rocm.outputs.version }}" = "10.1.0"
+      - name: hipcc --version
+        run: hipcc --version
+      - name: Compile and link a HIP program
+        run: hipcc .github/smoke/hello.hip -o hello --offload-arch=gfx1200
+      - name: Build the library smoke tests with CMake
+        run: |
+          cmake -S .github/smoke -B build \
+            -DCMAKE_PREFIX_PATH="$ROCM_PATH" -DSMOKE_REQUIRE_LIBS=ON
+          cmake --build build
+
+  idempotent-linux:
+    name: Running twice on ubuntu-latest
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install ROCm (first run)
+        id: first
+        uses: ./
+        with:
+          version: '10.1.0'
+          gfx: gfx1200
+      - name: Install ROCm (second run)
+        id: second
+        uses: ./
+        with:
+          version: '10.1.0'
+          gfx: gfx1200
+      - name: Both runs agree and hipcc works
+        run: |
+          test "${{ steps.first.outputs.ROCM_PATH }}" = "${{ steps.second.outputs.ROCM_PATH }}"
+          test "${{ steps.first.outputs.version }}" = "${{ steps.second.outputs.version }}"
+          test -x "$ROCM_PATH/bin/hipcc"
+          hipcc --version
+          hipcc .github/smoke/hello.hip -o hello --offload-arch=gfx1200
+
+  install-legacy:
+    name: Install ROCm 7.2.4 on ${{ matrix.os }}
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Disk before
+        run: df -h /
+      - name: Install ROCm
+        id: rocm
+        uses: ./
+        with:
+          version: '7.2.4'
+      - name: Disk after
+        run: df -h /
+      - name: Check outputs and environment
+        run: |
+          echo "ROCM_PATH=$ROCM_PATH HIP_PATH=$HIP_PATH"
+          test "$ROCM_PATH" = "/opt/rocm-7.2.4"
+          test "${{ steps.rocm.outputs.ROCM_PATH }}" = "/opt/rocm-7.2.4"
+          test "${{ steps.rocm.outputs.version }}" = "7.2.4"
+          test -x "$ROCM_PATH/bin/hipcc"
+      - name: hipcc --version
+        run: hipcc --version
+      - name: Compile and link a HIP program
+        run: hipcc .github/smoke/hello.hip -o hello --offload-arch=gfx1200
+      - name: Build the smoke tests with CMake (libraries are optional here)
+        run: |
+          cmake -S .github/smoke -B build -DCMAKE_PREFIX_PATH="$ROCM_PATH"
+          cmake --build build
+
+  install-windows:
+    name: Install on ${{ matrix.os }}
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Disk before
+        run: Get-PSDrive C | Format-Table Name, Used, Free
+      - name: Install ROCm
+        id: rocm
+        uses: ./
+        with:
+          version: '10.1.0'
+          gfx: gfx1200
+      - name: Disk after
+        run: Get-PSDrive C | Format-Table Name, Used, Free
+      - name: Check outputs and environment
+        run: |
+          "ROCM_PATH=$env:ROCM_PATH"
+          "HIP_PATH=$env:HIP_PATH"
+          "HIP_DEVICE_LIB_PATH=$env:HIP_DEVICE_LIB_PATH"
+          if ($env:ROCM_PATH -ne 'C:\rocm\core-10.1') { throw "ROCM_PATH is $env:ROCM_PATH" }
+          if ($env:HIP_PATH -ne $env:ROCM_PATH) { throw "HIP_PATH is $env:HIP_PATH" }
+          if (-not (Test-Path "$env:HIP_DEVICE_LIB_PATH\ocml.bc")) { throw 'device libraries not found' }
+          if ('${{ steps.rocm.outputs.ROCM_PATH }}' -ne $env:ROCM_PATH) { throw 'ROCM_PATH output differs' }
+          if ('${{ steps.rocm.outputs.version }}' -ne '10.1.0') { throw 'version output differs' }
+          if (-not (Test-Path "$env:ROCM_PATH\bin\hipcc.exe")) { throw 'hipcc.exe missing' }
+      - name: hipcc --version
+        run: hipcc --version
+      - name: Compile and link a HIP program
+        run: hipcc .github/smoke/hello.hip -o hello.exe --offload-arch=gfx1200
+      - name: Build the library smoke tests with CMake
+        run: |
+          cmake -S .github/smoke -B build -G Ninja `
+            -DCMAKE_PREFIX_PATH="$env:ROCM_PATH" -DSMOKE_REQUIRE_LIBS=ON
+          cmake --build build
+
+  reject-bad-input:
+    name: Rejects ${{ matrix.name }}
+    needs: check
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: a version that is not listed
+            version: '10.9.999'
+            gfx: gfx1200
+            components: dev
+            expect: 'is not in the supported list'
+          - name: an unsupported packaging scheme
+            version: '8.0.0'
+            gfx: gfx1200
+            components: dev
+            expect: 'does not support'
+          - name: a malformed version
+            version: '10.1.0; id'
+            gfx: gfx1200
+            components: dev
+            expect: 'Invalid ROCm version'
+          - name: a malformed gfx target
+            version: '10.1.0'
+            gfx: 'gfx1200;id'
+            components: dev
+            expect: 'Invalid gfx target'
+          - name: an unknown component
+            version: '10.1.0'
+            gfx: gfx1200
+            components: kernel
+            expect: 'Invalid component'
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Run the action and expect a clean failure
+        env:
+          INPUT_VERSION: ${{ matrix.version }}
+          INPUT_GFX: ${{ matrix.gfx }}
+          INPUT_COMPONENTS: ${{ matrix.components }}
+          EXPECT: ${{ matrix.expect }}
+        run: |
+          set +e
+          out=$(node dist/index.js 2>&1)
+          code=$?
+          echo "$out"
+          if [ "$code" -eq 0 ]; then
+            echo "::error::Expected the action to fail, but it succeeded."
+            exit 1
+          fi
+          grep -qF -- "$EXPECT" <<<"$out" || {
+            echo "::error::Failure message did not contain: $EXPECT"
+            exit 1
+          }
