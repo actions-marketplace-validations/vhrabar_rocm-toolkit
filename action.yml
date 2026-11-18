@@ -1,4 +1,4 @@
-name: Setup ROCm (unofficial)
+name: Setup ROCm and HIP Toolchain
 description: >-
   Unofficial action that installs AMD ROCm / HIP SDK on Linux and Windows
   runners. Pick a version and GPU target, get hipcc on PATH. Not affiliated
@@ -6,7 +6,7 @@ description: >-
 author: vhrabar
 branding:
   icon: cpu
-  color: gray-dark
+  color: red
 
 inputs:
   version:
