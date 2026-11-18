@@ -1,8 +1,7 @@
 name: Setup ROCm and HIP Toolchain
 description: >-
-  Unofficial action that installs AMD ROCm / HIP SDK on Linux and Windows
-  runners. Pick a version and GPU target, get hipcc on PATH. Not affiliated
-  with AMD.
+  Unofficial action to install AMD ROCm / HIP SDK on Linux and Windows
+  runners, with hipcc on PATH. Not affiliated with AMD.
 author: vhrabar
 branding:
   icon: cpu
