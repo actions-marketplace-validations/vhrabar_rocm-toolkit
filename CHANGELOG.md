@@ -18,6 +18,13 @@ exported variable is a breaking change.
   possible the step fails with a clear message. Missing `ca-certificates` and
   `gpg` are installed first, and only when absent, so hosted runners are
   unaffected ([#15]).
+- **Linux, RHEL 8, 9 and 10 (ROCm 10.x):** installs from AMD's RPM repository
+  with dnf, in `manylinux_2_28` and other RHEL-family containers. The signing
+  key is checked against the pinned fingerprint before `rpm --import`, and the
+  repository is set up with `gpgcheck=1` and `repo_gpgcheck=1`. Missing
+  `gnupg2` is installed first, and `gcc-c++` with ROCm, because `hipcc` needs
+  it to compile and link. ROCm 7.2.x and older on RHEL fail early with a clear
+  message ([#17]).
 
 ## [1.0.0] - 2026-11-18
 
@@ -53,3 +60,4 @@ First release.
 [Unreleased]: https://github.com/vhrabar/rocm-toolkit/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/vhrabar/rocm-toolkit/releases/tag/v1.0.0
 [#15]: https://github.com/vhrabar/rocm-toolkit/issues/15
+[#17]: https://github.com/vhrabar/rocm-toolkit/issues/17
