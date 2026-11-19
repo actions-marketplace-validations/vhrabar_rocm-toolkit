@@ -38,8 +38,8 @@ import * as child from 'child_process';
 import { setTimeout as setTimeout$1 } from 'timers';
 import * as fs$1 from 'node:fs';
 import * as os$1 from 'node:os';
-import * as path$1 from 'node:path';
 import * as stream from 'stream';
+import * as path$1 from 'node:path';
 import { spawn } from 'node:child_process';
 import * as https$1 from 'node:https';
 import { pipeline } from 'node:stream/promises';
@@ -30573,38 +30573,6 @@ function parseInputs(raw) {
     };
 }
 
-function buildEnv(root, os) {
-    const p = os === 'windows' ? path$1.win32 : path$1.posix;
-    const env = {
-        rocmPath: root,
-        hipPath: root,
-        binDir: p.join(root, 'bin'),
-        libDir: p.join(root, 'lib')
-    };
-    if (os === 'windows') {
-        env.deviceLibPath = p.join(root, 'lib', 'llvm', 'amdgcn', 'bitcode');
-    }
-    return env;
-}
-/** Prepend libDir to an existing LD_LIBRARY_PATH value without duplicates. */
-function mergeLibraryPath(libDir, existing) {
-    const parts = (existing ?? '').split(':').filter((s) => s.length > 0);
-    return [libDir, ...parts.filter((s) => s !== libDir)].join(':');
-}
-function applyEnv(env, os, version) {
-    exportVariable('ROCM_PATH', env.rocmPath);
-    exportVariable('HIP_PATH', env.hipPath);
-    if (env.deviceLibPath) {
-        exportVariable('HIP_DEVICE_LIB_PATH', env.deviceLibPath);
-    }
-    addPath(env.binDir);
-    if (os === 'linux') {
-        exportVariable('LD_LIBRARY_PATH', mergeLibraryPath(env.libDir, process.env['LD_LIBRARY_PATH']));
-    }
-    setOutput('ROCM_PATH', env.rocmPath);
-    setOutput('version', version);
-}
-
 var re = {exports: {}};
 
 var constants;
@@ -34324,49 +34292,6 @@ async function installLegacy(inputs, distro) {
     return prefix;
 }
 
-const KEY_URL = 'https://stable.repo.amd.com/rocm/gpg/packages.gpg';
-/** Primary key fingerprint of the AMD package signing key (see docs/RESEARCH.md). */
-const KEY_FINGERPRINT = 'D0F004A0025A1145C7807FCD0701EAC4D5E02107';
-/** Extract fingerprints from `gpg --show-keys --with-colons` output. */
-function parseFingerprints(colonOutput) {
-    return colonOutput
-        .split('\n')
-        .filter((line) => line.startsWith('fpr:'))
-        .map((line) => line.split(':')[9] ?? '')
-        .filter((fpr) => fpr.length > 0);
-}
-/**
- * Download the AMD signing key and refuse it unless it carries the expected
- * fingerprint. Returns the path of the ASCII-armored key file.
- */
-async function fetchCheckedKey() {
-    const keyFile = await downloadTool(KEY_URL);
-    const shown = await getExecOutput('gpg', ['--show-keys', '--with-colons', keyFile], { silent: true });
-    if (!parseFingerprints(shown.stdout).includes(KEY_FINGERPRINT)) {
-        throw new Error(`The downloaded AMD signing key does not match the expected fingerprint ` +
-            `${KEY_FINGERPRINT}. Refusing to trust it.`);
-    }
-    return keyFile;
-}
-
-/**
- * Install ROCm 10.x from the multi-arch package repo. The steps are the same
- * on every distro; only the package manager differs. Returns the prefix.
- */
-async function installMultiArch(inputs, distro, pm = apt) {
-    const packages = packageNames(inputs.version, inputs.gfx, inputs.components);
-    startGroup(`Configure the AMD ROCm ${pm.kind} repository`);
-    await pm.ensurePrereqs();
-    await pm.addRepo(distro, await fetchCheckedKey());
-    endGroup();
-    startGroup(`Install ${packages.join(' ')}`);
-    await pm.install(packages);
-    endGroup();
-    const prefix = installPrefix(inputs.version);
-    requireHipcc(prefix);
-    return prefix;
-}
-
 const TARBALL_BASE = 'https://stable.repo.amd.com/rocm/core/tarball';
 const MARKER_FILE = '.setup-rocm';
 function httpGet(url, redirects = 3) {
@@ -34506,6 +34431,125 @@ async function installWindows(inputs, fetcher = defaultFetcher) {
     return prefix;
 }
 
+/**
+ * Evaluate `fn` for a context line. The flow has usually already thrown for
+ * the same reason, so a failure here must not hide the original error.
+ */
+function safe(fn) {
+    try {
+        return fn();
+    }
+    catch (error) {
+        return `(unknown: ${error instanceof Error ? error.message : String(error)})`;
+    }
+}
+/**
+ * What the action set out to do, built with the same helpers the install
+ * flows use, so a failure can be diagnosed from the message alone.
+ */
+function describePlan(plan) {
+    const { inputs, platform, scheme } = plan;
+    const lines = [`ROCm:     ${inputs.version} (${scheme} flow)`];
+    if (platform.os === 'windows') {
+        lines.push(`Platform: windows ${platform.arch}`);
+        lines.push(`Tarball:  ${safe(() => tarballUrl(inputs.version, windowsFamily(inputs.gfx)))}`);
+        return lines;
+    }
+    lines.push(`Platform: linux ${platform.arch}, ${platform.distro} ` +
+        `(${platform.packageManager ?? 'unknown package manager'})`);
+    if (scheme === 'legacy') {
+        lines.push(`Installer from: ${safe(() => listingUrl(inputs.version, codenameFor(platform.distro)))}`);
+        lines.push(`Packages: ${legacyPackages(inputs.components).join(' ')}`);
+    }
+    else {
+        lines.push(`Repo:     ${REPO_BASE}/${platform.distro}`);
+        lines.push(`Packages: ${packageNames(inputs.version, inputs.gfx, inputs.components).join(' ')}`);
+    }
+    return lines;
+}
+/** The step's failure message: the error +plan. */
+function failureMessage(error, plan) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!plan)
+        return message;
+    return [message, '', 'Install context:', ...describePlan(plan)].join('\n');
+}
+
+function buildEnv(root, os) {
+    const p = os === 'windows' ? path$1.win32 : path$1.posix;
+    const env = {
+        rocmPath: root,
+        hipPath: root,
+        binDir: p.join(root, 'bin'),
+        libDir: p.join(root, 'lib')
+    };
+    if (os === 'windows') {
+        env.deviceLibPath = p.join(root, 'lib', 'llvm', 'amdgcn', 'bitcode');
+    }
+    return env;
+}
+/** Prepend libDir to an existing LD_LIBRARY_PATH value without duplicates. */
+function mergeLibraryPath(libDir, existing) {
+    const parts = (existing ?? '').split(':').filter((s) => s.length > 0);
+    return [libDir, ...parts.filter((s) => s !== libDir)].join(':');
+}
+function applyEnv(env, os, version) {
+    exportVariable('ROCM_PATH', env.rocmPath);
+    exportVariable('HIP_PATH', env.hipPath);
+    if (env.deviceLibPath) {
+        exportVariable('HIP_DEVICE_LIB_PATH', env.deviceLibPath);
+    }
+    addPath(env.binDir);
+    if (os === 'linux') {
+        exportVariable('LD_LIBRARY_PATH', mergeLibraryPath(env.libDir, process.env['LD_LIBRARY_PATH']));
+    }
+    setOutput('ROCM_PATH', env.rocmPath);
+    setOutput('version', version);
+}
+
+const KEY_URL = 'https://stable.repo.amd.com/rocm/gpg/packages.gpg';
+/** Primary key fingerprint of the AMD package signing key (see docs/RESEARCH.md). */
+const KEY_FINGERPRINT = 'D0F004A0025A1145C7807FCD0701EAC4D5E02107';
+/** Extract fingerprints from `gpg --show-keys --with-colons` output. */
+function parseFingerprints(colonOutput) {
+    return colonOutput
+        .split('\n')
+        .filter((line) => line.startsWith('fpr:'))
+        .map((line) => line.split(':')[9] ?? '')
+        .filter((fpr) => fpr.length > 0);
+}
+/**
+ * Download the AMD signing key and refuse it unless it carries the expected
+ * fingerprint. Returns the path of the ASCII-armored key file.
+ */
+async function fetchCheckedKey() {
+    const keyFile = await downloadTool(KEY_URL);
+    const shown = await getExecOutput('gpg', ['--show-keys', '--with-colons', keyFile], { silent: true });
+    if (!parseFingerprints(shown.stdout).includes(KEY_FINGERPRINT)) {
+        throw new Error(`The downloaded AMD signing key does not match the expected fingerprint ` +
+            `${KEY_FINGERPRINT}. Refusing to trust it.`);
+    }
+    return keyFile;
+}
+
+/**
+ * Install ROCm 10.x from the multi-arch package repo. The steps are the same
+ * on every distro; only the package manager differs. Returns the prefix.
+ */
+async function installMultiArch(inputs, distro, pm = apt) {
+    const packages = packageNames(inputs.version, inputs.gfx, inputs.components);
+    startGroup(`Configure the AMD ROCm ${pm.kind} repository`);
+    await pm.ensurePrereqs();
+    await pm.addRepo(distro, await fetchCheckedKey());
+    endGroup();
+    startGroup(`Install ${packages.join(' ')}`);
+    await pm.install(packages);
+    endGroup();
+    const prefix = installPrefix(inputs.version);
+    requireHipcc(prefix);
+    return prefix;
+}
+
 const FAMILIES = [
     {
         repo: 'ubuntu',
@@ -34621,8 +34665,9 @@ function makePlan(raw, detect) {
     return { inputs, platform, scheme };
 }
 async function run() {
+    let plan;
     try {
-        const plan = makePlan(readRawInputs(), () => detectPlatform(process.platform, os$1.arch(), () => fs$1.readFileSync('/etc/os-release', 'utf8')));
+        plan = makePlan(readRawInputs(), () => detectPlatform(process.platform, os$1.arch(), () => fs$1.readFileSync('/etc/os-release', 'utf8')));
         info(`Plan: ROCm ${plan.inputs.version} on ${plan.platform.os} ` +
             `(${plan.scheme}, gfx: ${plan.inputs.gfx.join(',') || 'all'})`);
         if (plan.platform.os === 'linux' && plan.scheme === 'multiarch') {
@@ -34647,7 +34692,7 @@ async function run() {
         throw new Error(`No install flow for ${plan.platform.os} / ${plan.scheme}.`);
     }
     catch (error) {
-        setFailed(error instanceof Error ? error.message : String(error));
+        setFailed(failureMessage(error, plan));
     }
 }
 

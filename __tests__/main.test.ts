@@ -12,9 +12,15 @@ jest.unstable_mockModule('../src/windows.js', () => ({
 jest.unstable_mockModule('../src/linux/legacy.js', () => ({
   installLegacy: jest.fn()
 }))
-jest.unstable_mockModule('../src/linux/index.js', () => ({
-  installMultiArch: jest.fn()
-}))
+const installMultiArch = jest.fn<() => Promise<string>>()
+jest.unstable_mockModule('../src/linux/index.js', () => ({ installMultiArch }))
+const failureMessage = jest.fn(
+  (error: unknown, plan?: unknown) =>
+    `${(error as Error).message}${plan ? ' [with context]' : ''}`
+)
+jest.unstable_mockModule('../src/context.js', () => ({ failureMessage }))
+const detectPlatform = jest.fn()
+jest.unstable_mockModule('../src/platform.js', () => ({ detectPlatform }))
 
 const { makePlan, run } = await import('../src/main.js')
 
@@ -59,6 +65,23 @@ describe('makePlan', () => {
 })
 
 describe('run', () => {
+  beforeEach(() => {
+    detectPlatform.mockReturnValue(linux)
+  })
+
+  it('adds the install context when an install fails', async () => {
+    core.getInput.mockImplementation(
+      (name) => (raw as Record<string, string>)[name] ?? ''
+    )
+    installMultiArch.mockRejectedValueOnce(new Error('apt-get failed'))
+    await run()
+    expect(failureMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'apt-get failed' }),
+      expect.objectContaining({ platform: linux, scheme: 'multiarch' })
+    )
+    expect(core.setFailed).toHaveBeenCalledWith('apt-get failed [with context]')
+  })
+
   it('reports invalid input through setFailed', async () => {
     core.getInput.mockImplementation((name) =>
       name === 'version' ? 'nonsense' : ''

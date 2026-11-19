@@ -2,6 +2,7 @@ import * as core from '@actions/core'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import { parseInputs, type Inputs } from './inputs.js'
+import { failureMessage } from './context.js'
 import { applyEnv, buildEnv } from './env.js'
 import { installLegacy } from './linux/legacy.js'
 import { installMultiArch } from './linux/index.js'
@@ -48,8 +49,9 @@ export function makePlan(
 }
 
 export async function run(): Promise<void> {
+  let plan: Plan | undefined
   try {
-    const plan = makePlan(readRawInputs(), () =>
+    plan = makePlan(readRawInputs(), () =>
       detectPlatform(process.platform, os.arch(), () =>
         fs.readFileSync('/etc/os-release', 'utf8')
       )
@@ -81,6 +83,6 @@ export async function run(): Promise<void> {
     }
     throw new Error(`No install flow for ${plan.platform.os} / ${plan.scheme}.`)
   } catch (error) {
-    core.setFailed(error instanceof Error ? error.message : String(error))
+    core.setFailed(failureMessage(error, plan))
   }
 }
