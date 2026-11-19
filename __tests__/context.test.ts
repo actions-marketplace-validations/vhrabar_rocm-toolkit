@@ -57,6 +57,26 @@ describe('describePlan', () => {
     ])
   })
 
+  it('lists RPM package names on a dnf distro', () => {
+    expect(
+      describePlan({
+        ...multiarch,
+        platform: {
+          ...multiarch.platform,
+          distro: 'rhel9',
+          packageManager: 'dnf'
+        }
+      })[3]
+    ).toBe('Packages: amdrocm-core-devel10.1-gfx1200')
+  })
+
+  it('does not guess package names without a package manager', () => {
+    const platform = { ...multiarch.platform, packageManager: undefined }
+    expect(describePlan({ ...multiarch, platform })[3]).toBe(
+      'Packages: (unknown: no package manager detected)'
+    )
+  })
+
   it('keeps going when a detail cannot be computed', () => {
     const lines = describePlan({
       ...multiarch,

@@ -15,7 +15,12 @@ export async function installMultiArch(
   distro: string,
   pm: PackageManager = apt
 ): Promise<string> {
-  const packages = packageNames(inputs.version, inputs.gfx, inputs.components)
+  const packages = packageNames(
+    inputs.version,
+    inputs.gfx,
+    inputs.components,
+    pm.kind
+  )
   core.startGroup(`Configure the AMD ROCm ${pm.kind} repository`)
   await pm.ensurePrereqs()
   await pm.addRepo(distro, await fetchCheckedKey())

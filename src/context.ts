@@ -42,8 +42,17 @@ export function describePlan(plan: Plan): string[] {
     lines.push(`Packages: ${legacyPackages(inputs.components).join(' ')}`)
   } else {
     lines.push(`Repo:     ${REPO_BASE}/${platform.distro}`)
+    const pm = platform.packageManager
     lines.push(
-      `Packages: ${packageNames(inputs.version, inputs.gfx, inputs.components).join(' ')}`
+      `Packages: ${safe(() => {
+        if (!pm) throw new Error('no package manager detected')
+        return packageNames(
+          inputs.version,
+          inputs.gfx,
+          inputs.components,
+          pm
+        ).join(' ')
+      })}`
     )
   }
   return lines

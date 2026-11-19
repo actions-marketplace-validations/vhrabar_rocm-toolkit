@@ -77,14 +77,14 @@ describe('isInstalled', () => {
 
 describe('packageNames', () => {
   it('builds per-gfx names for dev', () => {
-    expect(packageNames('10.1.0', ['gfx1200'], ['dev'])).toEqual([
+    expect(packageNames('10.1.0', ['gfx1200'], ['dev'], 'apt')).toEqual([
       'amdrocm-core-dev10.1-gfx1200'
     ])
   })
 
   it('expands components x gfx', () => {
     expect(
-      packageNames('10.1.0', ['gfx1200', 'gfx90a'], ['runtime', 'sdk'])
+      packageNames('10.1.0', ['gfx1200', 'gfx90a'], ['runtime', 'sdk'], 'apt')
     ).toEqual([
       'amdrocm10.1-gfx1200',
       'amdrocm10.1-gfx90a',
@@ -94,7 +94,7 @@ describe('packageNames', () => {
   })
 
   it('uses version-only names for all architectures', () => {
-    expect(packageNames('10.1.0', [], ['dev'])).toEqual([
+    expect(packageNames('10.1.0', [], ['dev'], 'apt')).toEqual([
       'amdrocm-core-dev10.1'
     ])
   })
@@ -104,10 +104,35 @@ describe('packageNames', () => {
       packageNames(
         '10.1.0',
         ['gfx1200', 'gfx1201'],
-        ['developer-tools', 'opencl']
+        ['developer-tools', 'opencl'],
+        'apt'
       )
     ).toEqual(['amdrocm-developer-tools10.1', 'amdrocm-opencl10.1'])
   })
+
+  // Names as listed under rocm/core/packages/{rhel9,sles16}/x86_64/.
+  it.each(['dnf' as const, 'zypper' as const])(
+    'uses RPM names (-devel) for %s',
+    (kind) => {
+      expect(
+        packageNames(
+          '10.1.0',
+          ['gfx1200'],
+          ['runtime', 'dev', 'sdk', 'developer-tools', 'opencl'],
+          kind
+        )
+      ).toEqual([
+        'amdrocm10.1-gfx1200',
+        'amdrocm-core-devel10.1-gfx1200',
+        'amdrocm-core-sdk10.1-gfx1200',
+        'amdrocm-developer-tools10.1',
+        'amdrocm-opencl10.1'
+      ])
+      expect(packageNames('10.1.0', [], ['dev'], kind)).toEqual([
+        'amdrocm-core-devel10.1'
+      ])
+    }
+  )
 })
 
 describe('parseFingerprints', () => {

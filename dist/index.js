@@ -34063,10 +34063,20 @@ function requireHipcc(prefix) {
 
 const REPO_BASE = 'https://stable.repo.amd.com/rocm/core/packages';
 /**
- * Map components x gfx to package names. An empty gfx list means all
- * architectures, which uses the version-only package names.
+ * Name of the `dev` component's package. AMD follows each format's own
+ * convention: `-dev` for .deb, `-devel` for RPM (rhel8/9/10 and sles15/16
+ * listings).
  */
-function packageNames(version, gfx, components) {
+const DEV_PACKAGE = {
+    apt: 'amdrocm-core-dev',
+    dnf: 'amdrocm-core-devel',
+    zypper: 'amdrocm-core-devel'
+};
+/**
+ * Map components x gfx to the package names of `kind`. An empty gfx list
+ * means all architectures, which uses the version-only package names.
+ */
+function packageNames(version, gfx, components, kind) {
     const mm = majorMinor(version);
     const archs = gfx.length > 0 ? gfx.map((g) => `-${g}`) : [''];
     const names = [];
@@ -34078,7 +34088,7 @@ function packageNames(version, gfx, components) {
                 break;
             case 'dev':
                 for (const a of archs)
-                    names.push(`amdrocm-core-dev${mm}${a}`);
+                    names.push(`${DEV_PACKAGE[kind]}${mm}${a}`);
                 break;
             case 'sdk':
                 for (const a of archs)
@@ -34463,7 +34473,12 @@ function describePlan(plan) {
     }
     else {
         lines.push(`Repo:     ${REPO_BASE}/${platform.distro}`);
-        lines.push(`Packages: ${packageNames(inputs.version, inputs.gfx, inputs.components).join(' ')}`);
+        const pm = platform.packageManager;
+        lines.push(`Packages: ${safe(() => {
+            if (!pm)
+                throw new Error('no package manager detected');
+            return packageNames(inputs.version, inputs.gfx, inputs.components, pm).join(' ');
+        })}`);
     }
     return lines;
 }
@@ -34537,7 +34552,7 @@ async function fetchCheckedKey() {
  * on every distro; only the package manager differs. Returns the prefix.
  */
 async function installMultiArch(inputs, distro, pm = apt) {
-    const packages = packageNames(inputs.version, inputs.gfx, inputs.components);
+    const packages = packageNames(inputs.version, inputs.gfx, inputs.components, pm.kind);
     startGroup(`Configure the AMD ROCm ${pm.kind} repository`);
     await pm.ensurePrereqs();
     await pm.addRepo(distro, await fetchCheckedKey());
