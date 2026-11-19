@@ -10,6 +10,15 @@ exported variable is a breaking change.
 
 ## [Unreleased]
 
+### Added
+
+- **Linux job containers:** the action works in bare Ubuntu and Debian
+  containers that run as root and ship no `sudo`. Privileged commands run
+  directly when the job is root and through `sudo` otherwise; if neither is
+  possible the step fails with a clear message. Missing `ca-certificates` and
+  `gpg` are installed first, and only when absent, so hosted runners are
+  unaffected ([#15]).
+
 ## [1.0.0] - 2026-11-18
 
 First release.
@@ -43,3 +52,4 @@ First release.
 
 [Unreleased]: https://github.com/vhrabar/rocm-toolkit/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/vhrabar/rocm-toolkit/releases/tag/v1.0.0
+[#15]: https://github.com/vhrabar/rocm-toolkit/issues/15

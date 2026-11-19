@@ -55,6 +55,28 @@ jobs:
 
 The runner's Visual Studio provides the C++ standard library; the action does not install it.
 
+### Containers
+
+Bare Ubuntu and Debian job containers work without a setup step:
+
+```yaml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: debian:12
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: vhrabar/rocm-toolkit@v1
+        with:
+          version: '10.1.0'
+          gfx: gfx1200
+      - run: hipcc my_kernel.hip -o my_kernel --offload-arch=gfx1200
+```
+
+Privileged commands run through `sudo`, or directly when the job already runs as root (as containers usually do). If neither is possible, the step fails with a clear message.
+If `ca-certificates` or `gpg` are missing, the step installs them; nothing else is added to the image.
+Additional tools beyond ROCm, such as `cmake`, are up to the end-user.
+
 ### Matrix
 
 ```yaml
@@ -114,12 +136,12 @@ The apt repository's signing key is checked against a pinned fingerprint before 
 
 | Platform | ROCm versions | Tested in CI |
 | --- | --- | --- |
-| Ubuntu 22.04, 24.04, 26.04 | 10.0.0, 10.1.0 | 10.1.0, `gfx1200` |
-| Debian 12, 13 | 10.0.0, 10.1.0 | not tested |
-| Ubuntu 22.04, 24.04 | 6.2.2, 7.0.1, 7.2.4 | 7.2.4 only |
+| Ubuntu 22.04, 24.04, 26.04 | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, on runners and in containers |
+| Debian 12, 13 | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, in containers only |
+| Ubuntu 22.04, 24.04 | 6.2.2, 7.0.1, 7.2.4 | 7.2.4 only, on runners and in containers |
 | Windows (`windows-2022`, `windows-2025`) | 10.0.0, 10.1.0 | 10.1.0, `gfx1200` |
 
-Every tested combination installs, runs `hipcc --version`, compiles a HIP program and builds the library smoke project (compile and link only).
+Every tested combination installs, runs `hipcc --version` and compiles a HIP program. On hosted runners CI also builds the library smoke project (compile and link only); in bare containers it does not, since they have no `cmake`.
 On Linux the 10.x install adds about 10 GB of disk and takes about one to two minutes; on Windows it takes about 85 s and adds about 9 GB.
 
 A version outside the lis is rejected with a clear error. Windows supports ROCm 10.x only.

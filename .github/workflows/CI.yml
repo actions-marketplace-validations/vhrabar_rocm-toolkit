@@ -127,6 +127,75 @@ jobs:
           cmake -S .github/smoke -B build -DCMAKE_PREFIX_PATH="$ROCM_PATH"
           cmake --build build
 
+  install-container:
+    name: Install ROCm ${{ matrix.version }} in ${{ matrix.image }}
+    needs: check
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: 'ubuntu:22.04'
+            version: '10.1.0'
+            gfx: gfx1200
+            rocm-path: /opt/rocm/core-10.1
+          - image: 'ubuntu:24.04'
+            version: '10.1.0'
+            gfx: gfx1200
+            rocm-path: /opt/rocm/core-10.1
+          - image: 'ubuntu:26.04'
+            version: '10.1.0'
+            gfx: gfx1200
+            rocm-path: /opt/rocm/core-10.1
+          - image: 'debian:12'
+            version: '10.1.0'
+            gfx: gfx1200
+            rocm-path: /opt/rocm/core-10.1
+          - image: 'debian:13'
+            version: '10.1.0'
+            gfx: gfx1200
+            rocm-path: /opt/rocm/core-10.1
+          - image: 'ubuntu:22.04'
+            version: '7.2.4'
+            gfx: ''
+            rocm-path: /opt/rocm-7.2.4
+          - image: 'ubuntu:24.04'
+            version: '7.2.4'
+            gfx: ''
+            rocm-path: /opt/rocm-7.2.4
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: The image is bare (root, no sudo, gpg or ca-certificates)
+        run: |
+          test "$(id -u)" -eq 0
+          if command -v sudo; then echo "::error::sudo is present"; exit 1; fi
+          if command -v gpg; then echo "::error::gpg is present"; exit 1; fi
+          if dpkg-query -W -f='${Status}' ca-certificates 2>/dev/null | grep -q 'install ok installed'; then
+            echo "::error::ca-certificates is installed"; exit 1
+          fi
+      - name: Install ROCm
+        id: rocm
+        uses: ./
+        with:
+          version: ${{ matrix.version }}
+          gfx: ${{ matrix.gfx }}
+      - name: Check outputs and environment
+        env:
+          EXPECTED: ${{ matrix.rocm-path }}
+        run: |
+          echo "ROCM_PATH=$ROCM_PATH HIP_PATH=$HIP_PATH"
+          test "$ROCM_PATH" = "$EXPECTED"
+          test "${{ steps.rocm.outputs.ROCM_PATH }}" = "$EXPECTED"
+          test "${{ steps.rocm.outputs.version }}" = "${{ matrix.version }}"
+          test -x "$ROCM_PATH/bin/hipcc"
+      - name: hipcc --version
+        run: hipcc --version
+      # No CMake smoke test here: bare images have no cmake, and the library
+      # checks are covered by the hosted-runner jobs above.
+      - name: Compile and link a HIP program
+        run: hipcc .github/smoke/hello.hip -o hello --offload-arch=gfx1200
+
   install-windows:
     name: Install on ${{ matrix.os }}
     needs: check
