@@ -22,7 +22,8 @@ const tc = {
 }
 const fsMock = {
   readFileSync: jest.fn<(p: string, enc: string) => string>(),
-  existsSync: jest.fn<(p: string) => boolean>()
+  existsSync: jest.fn<(p: string) => boolean>(),
+  rmSync: jest.fn<(p: string, opts?: unknown) => void>()
 }
 jest.unstable_mockModule('@actions/core', () => core)
 jest.unstable_mockModule('@actions/exec', () => execMock)
@@ -188,6 +189,18 @@ describe('installLegacy', () => {
       [...apt, 'install', '-y', '--no-install-recommends', 'ca-certificates'],
       [...apt, 'install', '-y', '/tmp/amdgpu-install_7.2.4.70204-1_all.deb']
     ])
+  })
+
+  it('removes a .deb left by an earlier run before downloading it', async () => {
+    await legacy.installLegacy(inputs, 'ubuntu2404')
+    const debPath = '/tmp/amdgpu-install_7.2.4.70204-1_all.deb'
+    expect(fsMock.rmSync).toHaveBeenCalledWith(debPath, { force: true })
+    const debDownload = tc.downloadTool.mock.calls.findIndex(([url]) =>
+      url.endsWith('.deb')
+    )
+    expect(fsMock.rmSync.mock.invocationCallOrder[0]).toBeLessThan(
+      tc.downloadTool.mock.invocationCallOrder[debDownload] ?? 0
+    )
   })
 
   it('warns that gfx is ignored', async () => {

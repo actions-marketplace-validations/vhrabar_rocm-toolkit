@@ -101,10 +101,9 @@ export async function installLegacy(
   core.endGroup()
 
   core.startGroup('Configure the AMD ROCm apt repository')
-  const debFile = await tc.downloadTool(
-    `${base}${debName}`,
-    path.join(process.env['RUNNER_TEMP'] ?? os.tmpdir(), debName)
-  )
+  const debPath = path.join(process.env['RUNNER_TEMP'] ?? os.tmpdir(), debName)
+  fs.rmSync(debPath, { force: true })
+  const debFile = await tc.downloadTool(`${base}${debName}`, debPath)
 
   await ensurePackages(['ca-certificates'])
   await asRoot([...APT_GET, 'install', '-y', debFile])

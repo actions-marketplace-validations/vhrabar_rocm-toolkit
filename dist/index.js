@@ -34290,7 +34290,9 @@ async function installLegacy(inputs, distro) {
     info(`Found ${debName}`);
     endGroup();
     startGroup('Configure the AMD ROCm apt repository');
-    const debFile = await downloadTool(`${base}${debName}`, path$1.join(process.env['RUNNER_TEMP'] ?? os$1.tmpdir(), debName));
+    const debPath = path$1.join(process.env['RUNNER_TEMP'] ?? os$1.tmpdir(), debName);
+    fs$1.rmSync(debPath, { force: true });
+    const debFile = await downloadTool(`${base}${debName}`, debPath);
     await ensurePackages(['ca-certificates']);
     await asRoot([...APT_GET, 'install', '-y', debFile]);
     await asRoot([...APT_GET, 'update']);
