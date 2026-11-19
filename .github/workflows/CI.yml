@@ -140,38 +140,64 @@ jobs:
             version: '10.1.0'
             gfx: gfx1200
             rocm-path: /opt/rocm/core-10.1
+            absent: sudo gpg
           - image: 'ubuntu:24.04'
             version: '10.1.0'
             gfx: gfx1200
             rocm-path: /opt/rocm/core-10.1
+            absent: sudo gpg
           - image: 'ubuntu:26.04'
             version: '10.1.0'
             gfx: gfx1200
             rocm-path: /opt/rocm/core-10.1
+            absent: sudo gpg
           - image: 'debian:12'
             version: '10.1.0'
             gfx: gfx1200
             rocm-path: /opt/rocm/core-10.1
+            absent: sudo gpg
           - image: 'debian:13'
             version: '10.1.0'
             gfx: gfx1200
             rocm-path: /opt/rocm/core-10.1
+            absent: sudo gpg
           - image: 'ubuntu:22.04'
             version: '7.2.4'
             gfx: ''
             rocm-path: /opt/rocm-7.2.4
+            absent: sudo gpg
           - image: 'ubuntu:24.04'
             version: '7.2.4'
             gfx: ''
             rocm-path: /opt/rocm-7.2.4
+            absent: sudo gpg
+          - image: 'quay.io/pypa/manylinux_2_28_x86_64'
+            version: '10.1.0'
+            gfx: gfx1200
+            rocm-path: /opt/rocm/core-10.1
+            absent: sudo
+          - image: 'almalinux:9'
+            version: '10.1.0'
+            gfx: gfx1200
+            rocm-path: /opt/rocm/core-10.1
+            absent: sudo
+          - image: 'almalinux:10'
+            version: '10.1.0'
+            gfx: gfx1200
+            rocm-path: /opt/rocm/core-10.1
+            absent: sudo gpg
     steps:
       - uses: actions/checkout@v7.0.1
-      - name: The image is bare (root, no sudo, gpg or ca-certificates)
+      - name: The image is bare (root, without ${{ matrix.absent }})
+        env:
+          ABSENT: ${{ matrix.absent }}
         run: |
           test "$(id -u)" -eq 0
-          if command -v sudo; then echo "::error::sudo is present"; exit 1; fi
-          if command -v gpg; then echo "::error::gpg is present"; exit 1; fi
-          if dpkg-query -W -f='${Status}' ca-certificates 2>/dev/null | grep -q 'install ok installed'; then
+          for tool in $ABSENT; do
+            if command -v "$tool"; then echo "::error::$tool is present"; exit 1; fi
+          done
+          if command -v dpkg-query >/dev/null &&
+             dpkg-query -W -f='${Status}' ca-certificates 2>/dev/null | grep -q 'install ok installed'; then
             echo "::error::ca-certificates is installed"; exit 1
           fi
       - name: Install ROCm
@@ -195,6 +221,17 @@ jobs:
       # checks are covered by the hosted-runner jobs above.
       - name: Compile and link a HIP program
         run: hipcc .github/smoke/hello.hip -o hello --offload-arch=gfx1200
+      - name: Install ROCm again
+        id: again
+        uses: ./
+        with:
+          version: ${{ matrix.version }}
+          gfx: ${{ matrix.gfx }}
+      - name: Both runs agree
+        run: |
+          test "${{ steps.rocm.outputs.ROCM_PATH }}" = "${{ steps.again.outputs.ROCM_PATH }}"
+          test "${{ steps.rocm.outputs.version }}" = "${{ steps.again.outputs.version }}"
+          hipcc .github/smoke/hello.hip -o hello2 --offload-arch=gfx1200
 
   install-windows:
     name: Install on ${{ matrix.os }}
