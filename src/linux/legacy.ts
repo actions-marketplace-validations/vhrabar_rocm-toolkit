@@ -5,7 +5,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import type { Component, Inputs } from '../inputs.js'
 import { parseVersion } from '../versions.js'
-import { APT_GET } from './apt.js'
+import { APT_GET, ensurePackages } from './apt.js'
 import { requireHipcc } from './prefix.js'
 import { asRoot } from './root.js'
 
@@ -105,6 +105,8 @@ export async function installLegacy(
     `${base}${debName}`,
     path.join(process.env['RUNNER_TEMP'] ?? os.tmpdir(), debName)
   )
+
+  await ensurePackages(['ca-certificates'])
   await asRoot([...APT_GET, 'install', '-y', debFile])
   await asRoot([...APT_GET, 'update'])
   core.endGroup()

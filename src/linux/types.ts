@@ -4,6 +4,8 @@
  */
 export interface PackageManager {
   readonly kind: 'apt'
+  /** Install the tools the key check and repo setup need, if missing. */
+  ensurePrereqs(): Promise<void>
   /** Trust the checked key file and register the repo for `distro`. */
   addRepo(distro: string, keyFile: string): Promise<void>
   /** Refresh metadata and install `packages`. */

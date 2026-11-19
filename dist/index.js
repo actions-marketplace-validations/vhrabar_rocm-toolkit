@@ -34157,6 +34157,39 @@ const APT_GET = [
     'DEBIAN_FRONTEND=noninteractive',
     'apt-get'
 ];
+/**
+ * Packages the multi-arch flow needs that bare container images lack:
+ * `gpg` for the key check and `--dearmor`, `ca-certificates` for apt.
+ */
+const APT_PREREQS = ['ca-certificates', 'gpg'];
+/** Whether `pkg` is installed according to dpkg. Needs no root. */
+async function isInstalled(pkg) {
+    const { exitCode, stdout } = await getExecOutput('dpkg-query', ['-W', '-f=${Status}', pkg], { silent: true, ignoreReturnCode: true });
+    return exitCode === 0 && stdout.trim() === 'install ok installed';
+}
+/**
+ * Install those of `packages` that are missing. Does nothing when all are
+ * present (hosted runners), so it only touches apt in bare containers.
+ * Without ca-certificates apt silently ignores https repos, so this must run
+ * before they are added rather than being inferred from a failure.
+ */
+async function ensurePackages(packages) {
+    const missing = [];
+    for (const pkg of packages)
+        if (!(await isInstalled(pkg)))
+            missing.push(pkg);
+    if (missing.length === 0)
+        return;
+    info(`Installing missing prerequisites: ${missing.join(' ')}`);
+    await asRoot([...APT_GET, 'update']);
+    await asRoot([
+        ...APT_GET,
+        'install',
+        '-y',
+        '--no-install-recommends',
+        ...missing
+    ]);
+}
 function buildSources(distro) {
     return [
         'Types: deb',
@@ -34170,6 +34203,9 @@ function buildSources(distro) {
 }
 const apt = {
     kind: 'apt',
+    async ensurePrereqs() {
+        await ensurePackages(APT_PREREQS);
+    },
     async addRepo(distro, keyFile) {
         await asRoot(['mkdir', '-p', path$1.posix.dirname(KEYRING_PATH)]);
         await asRoot([
@@ -34269,6 +34305,7 @@ async function installLegacy(inputs, distro) {
     endGroup();
     startGroup('Configure the AMD ROCm apt repository');
     const debFile = await downloadTool(`${base}${debName}`, path$1.join(process.env['RUNNER_TEMP'] ?? os$1.tmpdir(), debName));
+    await ensurePackages(['ca-certificates']);
     await asRoot([...APT_GET, 'install', '-y', debFile]);
     await asRoot([...APT_GET, 'update']);
     endGroup();
@@ -34319,6 +34356,7 @@ async function fetchCheckedKey() {
 async function installMultiArch(inputs, distro, pm = apt) {
     const packages = packageNames(inputs.version, inputs.gfx, inputs.components);
     startGroup(`Configure the AMD ROCm ${pm.kind} repository`);
+    await pm.ensurePrereqs();
     await pm.addRepo(distro, await fetchCheckedKey());
     endGroup();
     startGroup(`Install ${packages.join(' ')}`);

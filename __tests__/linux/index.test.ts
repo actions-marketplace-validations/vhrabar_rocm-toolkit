@@ -1,6 +1,6 @@
 import { jest } from '@jest/globals'
 
-const core = { startGroup: jest.fn(), endGroup: jest.fn() }
+const core = { startGroup: jest.fn(), endGroup: jest.fn(), info: jest.fn() }
 const execMock = {
   exec: jest.fn<(cmd: string, args?: string[]) => Promise<number>>(),
   getExecOutput:
@@ -9,7 +9,7 @@ const execMock = {
         cmd: string,
         args?: string[],
         opts?: unknown
-      ) => Promise<{ stdout: string }>
+      ) => Promise<{ exitCode: number; stdout: string }>
     >()
 }
 const tc = { downloadTool: jest.fn<(url: string) => Promise<string>>() }
@@ -28,7 +28,7 @@ jest.unstable_mockModule('@actions/tool-cache', () => tc)
 jest.unstable_mockModule('node:fs', () => ({ ...fsMock, default: fsMock }))
 
 const { installMultiArch } = await import('../../src/linux/index.js')
-const { buildSources } = await import('../../src/linux/apt.js')
+const { buildSources, isInstalled } = await import('../../src/linux/apt.js')
 const { KEY_FINGERPRINT, parseFingerprints } =
   await import('../../src/linux/key.js')
 const { packageNames } = await import('../../src/linux/packages.js')
@@ -61,6 +61,17 @@ describe('buildSources', () => {
         ''
       ].join('\n')
     )
+  })
+})
+
+describe('isInstalled', () => {
+  it.each([
+    [0, 'install ok installed', true],
+    [0, 'deinstall ok config-files', false],
+    [1, '', false]
+  ])('exit %i, status %j -> %s', async (exitCode, stdout, expected) => {
+    execMock.getExecOutput.mockResolvedValueOnce({ exitCode, stdout })
+    await expect(isInstalled('gpg')).resolves.toBe(expected)
   })
 })
 
@@ -117,9 +128,21 @@ describe('installMultiArch', () => {
     logFileSuffix: 'log.txt'
   }
 
+  /** Packages dpkg-query reports as not installed. */
+  let notInstalled: string[]
+  let keyListing: string
+
   beforeEach(() => {
+    notInstalled = []
+    keyListing = GOOD_KEY
     tc.downloadTool.mockResolvedValue('/tmp/key.gpg')
-    execMock.getExecOutput.mockResolvedValue({ stdout: GOOD_KEY })
+    execMock.getExecOutput.mockImplementation(async (cmd, args = []) => {
+      if (cmd !== 'dpkg-query') return { exitCode: 0, stdout: keyListing }
+      const pkg = args[args.length - 1] ?? ''
+      return notInstalled.includes(pkg)
+        ? { exitCode: 1, stdout: '' }
+        : { exitCode: 0, stdout: 'install ok installed' }
+    })
     execMock.exec.mockResolvedValue(0)
     fsMock.existsSync.mockReturnValue(true)
   })
@@ -157,10 +180,39 @@ describe('installMultiArch', () => {
     )
   })
 
+  it('makes no prerequisite apt calls when everything is installed', async () => {
+    await installMultiArch(inputs, 'ubuntu2404')
+    const calls = execMock.exec.mock.calls.map(([cmd, args]) => [
+      cmd,
+      ...(args ?? [])
+    ])
+    expect(calls.filter((c) => c.includes('update'))).toHaveLength(1)
+    expect(calls.flat()).not.toContain('ca-certificates')
+  })
+
+  it('installs only the missing prerequisites before checking the key', async () => {
+    notInstalled = ['gpg']
+    await installMultiArch(inputs, 'ubuntu2404')
+    const apt = ['sudo', 'env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get']
+    const calls = execMock.exec.mock.calls.map(([cmd, args]) => [
+      cmd,
+      ...(args ?? [])
+    ])
+    expect(calls.slice(0, 2)).toEqual([
+      [...apt, 'update'],
+      [...apt, 'install', '-y', '--no-install-recommends', 'gpg']
+    ])
+    const prereqInstall = execMock.exec.mock.invocationCallOrder[1] ?? 0
+    const keyCheck = execMock.getExecOutput.mock.calls.findIndex(
+      ([cmd]) => cmd === 'gpg'
+    )
+    expect(
+      execMock.getExecOutput.mock.invocationCallOrder[keyCheck]
+    ).toBeGreaterThan(prereqInstall)
+  })
+
   it('refuses a key with an unexpected fingerprint', async () => {
-    execMock.getExecOutput.mockResolvedValue({
-      stdout: 'fpr:::::::::AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:\n'
-    })
+    keyListing = 'fpr:::::::::AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:\n'
     await expect(installMultiArch(inputs, 'ubuntu2404')).rejects.toThrow(
       /does not match the expected fingerprint/
     )
