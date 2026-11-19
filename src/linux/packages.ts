@@ -5,6 +5,15 @@ import { majorMinor } from './prefix.js'
 export const REPO_BASE = 'https://stable.repo.amd.com/rocm/core/packages'
 
 /**
+ * Repo URL for `distro`, metadata is one step belowe
+ */
+export function repoUrl(distro: string, kind: PackageManagerKind): string {
+  return kind === 'apt'
+    ? `${REPO_BASE}/${distro}`
+    : `${REPO_BASE}/${distro}/x86_64/`
+}
+
+/**
  * Name of the `dev` component's package. AMD follows each format's own
  * convention: `-dev` for .deb, `-devel` for RPM (rhel8/9/10 and sles15/16
  * listings).

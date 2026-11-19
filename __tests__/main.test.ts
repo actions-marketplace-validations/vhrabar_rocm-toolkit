@@ -1,4 +1,5 @@
 import { jest } from '@jest/globals'
+import type { Platform } from '../src/platform.js'
 
 const core = {
   getInput: jest.fn<(name: string) => string>(),
@@ -12,7 +13,7 @@ jest.unstable_mockModule('../src/windows.js', () => ({
 jest.unstable_mockModule('../src/linux/legacy.js', () => ({
   installLegacy: jest.fn()
 }))
-const installMultiArch = jest.fn<() => Promise<string>>()
+const installMultiArch = jest.fn<(...args: unknown[]) => Promise<string>>()
 jest.unstable_mockModule('../src/linux/index.js', () => ({ installMultiArch }))
 const failureMessage = jest.fn(
   (error: unknown, plan?: unknown) =>
@@ -69,6 +70,21 @@ describe('run', () => {
     detectPlatform.mockReturnValue(linux)
   })
 
+  it('installs through dnf on a RHEL-family distro', async () => {
+    core.getInput.mockImplementation(
+      (name) => (raw as Record<string, string>)[name] ?? ''
+    )
+    const rhel: Platform = { ...linux, distro: 'rhel9', packageManager: 'dnf' }
+    detectPlatform.mockReturnValue(rhel)
+    installMultiArch.mockRejectedValueOnce(new Error('stop here'))
+    await run()
+    expect(installMultiArch).toHaveBeenCalledWith(
+      expect.objectContaining({ version: '10.1.0' }),
+      'rhel9',
+      expect.objectContaining({ kind: 'dnf' })
+    )
+  })
+
   it('adds the install context when an install fails', async () => {
     core.getInput.mockImplementation(
       (name) => (raw as Record<string, string>)[name] ?? ''
@@ -93,20 +109,40 @@ describe('run', () => {
   })
 })
 
-describe('makePlan on a distro without an install flow yet', () => {
-  it.each([
-    ['rhel9', 'dnf' as const],
-    ['sles15', 'zypper' as const]
-  ])('fails clearly on %s (%s)', (distro, packageManager) => {
-    expect(() =>
-      makePlan(raw, () => ({
-        os: 'linux',
-        arch: 'x64',
-        distro,
-        packageManager
-      }))
-    ).toThrow(
-      new RegExp(`Detected ${distro}, which uses ${packageManager}.*apt only`)
+describe('makePlan per package manager', () => {
+  const on =
+    (distro: string, packageManager: 'apt' | 'dnf' | 'zypper') =>
+    (): Platform => ({ os: 'linux', arch: 'x64', distro, packageManager })
+
+  it('accepts ROCm 10.x on a dnf distro', () => {
+    const plan = makePlan(raw, on('rhel9', 'dnf'))
+    expect(plan.scheme).toBe('multiarch')
+    expect(plan.platform.packageManager).toBe('dnf')
+  })
+
+  it('rejects zypper until it has a flow', () => {
+    expect(() => makePlan(raw, on('sles15', 'zypper'))).toThrow(
+      /Detected sles15, which uses zypper\..*apt .* and dnf .* only; sles15 is not supported yet/
     )
+  })
+
+  it('rejects a Linux platform without a package manager', () => {
+    expect(() =>
+      makePlan(raw, () => ({ os: 'linux', arch: 'x64', distro: 'x' }))
+    ).toThrow(/which uses an unknown package manager/)
+  })
+
+  it('rejects legacy versions on a dnf distro before doing anything', () => {
+    expect(() =>
+      makePlan({ ...raw, version: '7.2.4' }, on('rhel8', 'dnf'))
+    ).toThrow(
+      /ROCm 7\.2\.4 is not available on rhel8\..*use ROCm 10\.0\.0 or newer/
+    )
+  })
+
+  it('keeps legacy versions on apt', () => {
+    expect(
+      makePlan({ ...raw, version: '7.2.4' }, on('ubuntu2404', 'apt')).scheme
+    ).toBe('legacy')
   })
 })

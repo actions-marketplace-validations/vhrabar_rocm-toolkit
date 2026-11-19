@@ -3,7 +3,7 @@ import * as exec from '@actions/exec'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { REPO_BASE } from './packages.js'
+import { repoUrl } from './packages.js'
 import { asRoot } from './root.js'
 import type { PackageManager } from './types.js'
 
@@ -22,6 +22,16 @@ const NO_WEAK_DEPS = '--setopt=install_weak_deps=False'
  * almalinux:10; `ca-certificates` was present everywhere but is cheap to check.
  */
 export const DNF_PREREQS: readonly string[] = ['ca-certificates', 'gnupg2']
+
+/**
+ * What `hipcc` needs from the host to compile and link, and AMD's RPMs do not
+ * pull in. clang finds the C++ standard library through the GCC installation,
+ * and on EL the `libstdc++.so` it links against ships in `gcc-c++`: with only
+ * `gcc` + `libstdc++-devel`, almalinux:9 and :10 compile but fail to link
+ * ("unable to find library -lstdc++"). `gcc-c++` pulls in both. Installed in
+ * the same transaction as ROCm; dnf skips it where present.
+ */
+export const HIPCC_HOST_PACKAGES: readonly string[] = ['gcc-c++']
 
 /** Whether `pkg` is installed according to rpm. Needs no root. */
 export async function isRpmInstalled(pkg: string): Promise<boolean> {
@@ -50,7 +60,7 @@ export function buildRepoFile(distro: string): string {
   return [
     `[${REPO_ID}]`,
     'name=AMD ROCm',
-    `baseurl=${REPO_BASE}/${distro}/x86_64/`,
+    `baseurl=${repoUrl(distro, 'dnf')}`,
     'enabled=1',
     'gpgcheck=1',
     'repo_gpgcheck=1',
@@ -81,6 +91,12 @@ export const dnf: PackageManager = {
   async install(packages) {
     // Fetch and verify the AMD metadata first -> chech signature
     await asRoot([...DNF, 'makecache', '--repo', REPO_ID])
-    await asRoot([...DNF, 'install', NO_WEAK_DEPS, ...packages])
+    await asRoot([
+      ...DNF,
+      'install',
+      NO_WEAK_DEPS,
+      ...packages,
+      ...HIPCC_HOST_PACKAGES
+    ])
   }
 }

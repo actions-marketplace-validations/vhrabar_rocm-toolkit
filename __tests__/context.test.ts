@@ -57,7 +57,7 @@ describe('describePlan', () => {
     ])
   })
 
-  it('lists RPM package names on a dnf distro', () => {
+  it('lists the x86_64 repo and RPM package names on a dnf distro', () => {
     expect(
       describePlan({
         ...multiarch,
@@ -66,15 +66,21 @@ describe('describePlan', () => {
           distro: 'rhel9',
           packageManager: 'dnf'
         }
-      })[3]
-    ).toBe('Packages: amdrocm-core-devel10.1-gfx1200')
+      })
+    ).toEqual([
+      'ROCm:     10.1.0 (multiarch flow)',
+      'Platform: linux x64, rhel9 (dnf)',
+      'Repo:     https://stable.repo.amd.com/rocm/core/packages/rhel9/x86_64/',
+      'Packages: amdrocm-core-devel10.1-gfx1200'
+    ])
   })
 
   it('does not guess package names without a package manager', () => {
     const platform = { ...multiarch.platform, packageManager: undefined }
-    expect(describePlan({ ...multiarch, platform })[3]).toBe(
+    expect(describePlan({ ...multiarch, platform }).slice(2)).toEqual([
+      'Repo:     (unknown: no package manager detected)',
       'Packages: (unknown: no package manager detected)'
-    )
+    ])
   })
 
   it('keeps going when a detail cannot be computed', () => {

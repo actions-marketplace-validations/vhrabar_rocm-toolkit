@@ -3,7 +3,7 @@ import * as exec from '@actions/exec'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { REPO_BASE } from './packages.js'
+import { repoUrl } from './packages.js'
 import { asRoot } from './root.js'
 import type { PackageManager } from './types.js'
 
@@ -58,7 +58,7 @@ export async function ensurePackages(
 export function buildSources(distro: string): string {
   return [
     'Types: deb',
-    `URIs: ${REPO_BASE}/${distro}`,
+    `URIs: ${repoUrl(distro, 'apt')}`,
     'Suites: stable',
     'Components: main',
     'Architectures: amd64',

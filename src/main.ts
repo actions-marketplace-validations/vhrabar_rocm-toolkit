@@ -6,6 +6,7 @@ import { failureMessage } from './context.js'
 import { applyEnv, buildEnv } from './env.js'
 import { installLegacy } from './linux/legacy.js'
 import { installMultiArch } from './linux/index.js'
+import { packageManagerFor } from './linux/managers.js'
 import { installWindows } from './windows.js'
 import { detectPlatform, type Platform } from './platform.js'
 import { parseVersion, selectScheme, type Scheme } from './versions.js'
@@ -37,13 +38,22 @@ export function makePlan(
   const inputs = parseInputs(raw)
   const scheme = selectScheme(parseVersion(inputs.version))
   const platform = detect()
-  const pm = platform.packageManager
-  if (platform.os === 'linux' && pm !== 'apt') {
-    throw new Error(
-      `Detected ${platform.distro}, which uses ${pm ?? 'an unknown package manager'}. ` +
-        `This version of the action installs ROCm through apt only ` +
-        `(Ubuntu and Debian); ${platform.distro} is not supported yet.`
-    )
+  if (platform.os === 'linux') {
+    const pm = platform.packageManager ?? 'an unknown package manager'
+    if (!packageManagerFor(platform.packageManager)) {
+      throw new Error(
+        `Detected ${platform.distro}, which uses ${pm}. This version of the ` +
+          `action installs ROCm through apt (Ubuntu, Debian) and dnf (RHEL ` +
+          `family) only; ${platform.distro} is not supported yet.`
+      )
+    }
+    if (scheme === 'legacy' && pm !== 'apt') {
+      throw new Error(
+        `ROCm ${inputs.version} is not available on ${platform.distro}. ` +
+          `Versions 7.2.x and older are installed through AMD's Ubuntu ` +
+          `installer package; on ${platform.distro} use ROCm 10.0.0 or newer.`
+      )
+    }
   }
   return { inputs, platform, scheme }
 }
@@ -61,7 +71,9 @@ export async function run(): Promise<void> {
         `(${plan.scheme}, gfx: ${plan.inputs.gfx.join(',') || 'all'})`
     )
     if (plan.platform.os === 'linux' && plan.scheme === 'multiarch') {
-      const root = await installMultiArch(plan.inputs, plan.platform.distro)
+      const pm = packageManagerFor(plan.platform.packageManager)
+      if (!pm) throw new Error('No package manager for this distro.') // makePlan checked
+      const root = await installMultiArch(plan.inputs, plan.platform.distro, pm)
       applyEnv(buildEnv(root, 'linux'), 'linux', plan.inputs.version)
       return
     }

@@ -34,6 +34,7 @@ const { KEY_FINGERPRINT } = await import('../../src/linux/key.js')
 
 const GOOD_KEY = `fpr:::::::::${KEY_FINGERPRINT}:\n`
 const DNF_INSTALL = ['dnf', '-y', 'install', '--setopt=install_weak_deps=False']
+const HOST = ['gcc-c++']
 
 /** RPMs `rpm -q` reports as not installed. */
 let notInstalled: string[]
@@ -122,11 +123,11 @@ describe('dnf.addRepo / dnf.install', () => {
     )
   })
 
-  it('verifies the metadata, then installs without weak deps', async () => {
+  it('verifies the metadata, then installs ROCm and the host compiler bits', async () => {
     await dnf.install(['amdrocm-core-devel10.1-gfx1200'])
     expect(calls()).toEqual([
       ['dnf', '-y', 'makecache', '--repo', 'amdrocm'],
-      [...DNF_INSTALL, 'amdrocm-core-devel10.1-gfx1200']
+      [...DNF_INSTALL, 'amdrocm-core-devel10.1-gfx1200', ...HOST]
     ])
   })
 
@@ -171,7 +172,7 @@ describe('installMultiArch with dnf', () => {
         '/etc/yum.repos.d/amdrocm.repo'
       ],
       ['dnf', '-y', 'makecache', '--repo', 'amdrocm'],
-      [...DNF_INSTALL, 'amdrocm-core-devel10.1-gfx1200']
+      [...DNF_INSTALL, 'amdrocm-core-devel10.1-gfx1200', ...HOST]
     ])
     expect(fsMock.writeFileSync).toHaveBeenCalledWith(
       '/tmp/amdrocm.repo',

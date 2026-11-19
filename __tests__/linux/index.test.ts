@@ -28,7 +28,8 @@ jest.unstable_mockModule('@actions/tool-cache', () => tc)
 jest.unstable_mockModule('node:fs', () => ({ ...fsMock, default: fsMock }))
 
 const { installMultiArch } = await import('../../src/linux/index.js')
-const { buildSources, isInstalled } = await import('../../src/linux/apt.js')
+const { apt, buildSources, isInstalled } =
+  await import('../../src/linux/apt.js')
 const { KEY_FINGERPRINT, parseFingerprints } =
   await import('../../src/linux/key.js')
 const { packageNames } = await import('../../src/linux/packages.js')
@@ -173,7 +174,7 @@ describe('installMultiArch', () => {
   })
 
   it('configures apt, installs packages and returns the prefix', async () => {
-    const prefix = await installMultiArch(inputs, 'ubuntu2404')
+    const prefix = await installMultiArch(inputs, 'ubuntu2404', apt)
     expect(prefix).toBe('/opt/rocm/core-10.1')
     const calls = execMock.exec.mock.calls.map(([cmd, args]) => [
       cmd,
@@ -206,7 +207,7 @@ describe('installMultiArch', () => {
   })
 
   it('makes no prerequisite apt calls when everything is installed', async () => {
-    await installMultiArch(inputs, 'ubuntu2404')
+    await installMultiArch(inputs, 'ubuntu2404', apt)
     const calls = execMock.exec.mock.calls.map(([cmd, args]) => [
       cmd,
       ...(args ?? [])
@@ -217,15 +218,15 @@ describe('installMultiArch', () => {
 
   it('installs only the missing prerequisites before checking the key', async () => {
     notInstalled = ['gpg']
-    await installMultiArch(inputs, 'ubuntu2404')
-    const apt = ['sudo', 'env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get']
+    await installMultiArch(inputs, 'ubuntu2404', apt)
+    const aptGet = ['sudo', 'env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get']
     const calls = execMock.exec.mock.calls.map(([cmd, args]) => [
       cmd,
       ...(args ?? [])
     ])
     expect(calls.slice(0, 2)).toEqual([
-      [...apt, 'update'],
-      [...apt, 'install', '-y', '--no-install-recommends', 'gpg']
+      [...aptGet, 'update'],
+      [...aptGet, 'install', '-y', '--no-install-recommends', 'gpg']
     ])
     const prereqInstall = execMock.exec.mock.invocationCallOrder[1] ?? 0
     const keyCheck = execMock.getExecOutput.mock.calls.findIndex(
@@ -238,7 +239,7 @@ describe('installMultiArch', () => {
 
   it('refuses a key with an unexpected fingerprint', async () => {
     keyListing = 'fpr:::::::::AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:\n'
-    await expect(installMultiArch(inputs, 'ubuntu2404')).rejects.toThrow(
+    await expect(installMultiArch(inputs, 'ubuntu2404', apt)).rejects.toThrow(
       /does not match the expected fingerprint/
     )
     expect(execMock.exec).not.toHaveBeenCalled()
@@ -246,14 +247,14 @@ describe('installMultiArch', () => {
 
   it('fails when hipcc is missing after install', async () => {
     fsMock.existsSync.mockReturnValue(false)
-    await expect(installMultiArch(inputs, 'ubuntu2404')).rejects.toThrow(
+    await expect(installMultiArch(inputs, 'ubuntu2404', apt)).rejects.toThrow(
       /bin\/hipcc does not exist/
     )
   })
 
   it('stops on a failing apt command', async () => {
     execMock.exec.mockRejectedValueOnce(new Error('sudo failed'))
-    await expect(installMultiArch(inputs, 'ubuntu2404')).rejects.toThrow(
+    await expect(installMultiArch(inputs, 'ubuntu2404', apt)).rejects.toThrow(
       /sudo failed/
     )
   })

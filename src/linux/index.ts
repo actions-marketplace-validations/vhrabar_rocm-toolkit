@@ -1,6 +1,5 @@
 import * as core from '@actions/core'
 import type { Inputs } from '../inputs.js'
-import { apt } from './apt.js'
 import { fetchCheckedKey } from './key.js'
 import { packageNames } from './packages.js'
 import { installPrefix, requireHipcc } from './prefix.js'
@@ -13,7 +12,7 @@ import type { PackageManager } from './types.js'
 export async function installMultiArch(
   inputs: Inputs,
   distro: string,
-  pm: PackageManager = apt
+  pm: PackageManager
 ): Promise<string> {
   const packages = packageNames(
     inputs.version,

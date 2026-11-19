@@ -34063,6 +34063,14 @@ function requireHipcc(prefix) {
 
 const REPO_BASE = 'https://stable.repo.amd.com/rocm/core/packages';
 /**
+ * Repo URL for `distro`, metadata is one step belowe
+ */
+function repoUrl(distro, kind) {
+    return kind === 'apt'
+        ? `${REPO_BASE}/${distro}`
+        : `${REPO_BASE}/${distro}/x86_64/`;
+}
+/**
  * Name of the `dev` component's package. AMD follows each format's own
  * convention: `-dev` for .deb, `-devel` for RPM (rhel8/9/10 and sles15/16
  * listings).
@@ -34171,7 +34179,7 @@ async function ensurePackages(packages) {
 function buildSources(distro) {
     return [
         'Types: deb',
-        `URIs: ${REPO_BASE}/${distro}`,
+        `URIs: ${repoUrl(distro, 'apt')}`,
         'Suites: stable',
         'Components: main',
         'Architectures: amd64',
@@ -34472,8 +34480,12 @@ function describePlan(plan) {
         lines.push(`Packages: ${legacyPackages(inputs.components).join(' ')}`);
     }
     else {
-        lines.push(`Repo:     ${REPO_BASE}/${platform.distro}`);
         const pm = platform.packageManager;
+        lines.push(`Repo:     ${safe(() => {
+            if (!pm)
+                throw new Error('no package manager detected');
+            return repoUrl(platform.distro, pm);
+        })}`);
         lines.push(`Packages: ${safe(() => {
             if (!pm)
                 throw new Error('no package manager detected');
@@ -34551,7 +34563,7 @@ async function fetchCheckedKey() {
  * Install ROCm 10.x from the multi-arch package repo. The steps are the same
  * on every distro; only the package manager differs. Returns the prefix.
  */
-async function installMultiArch(inputs, distro, pm = apt) {
+async function installMultiArch(inputs, distro, pm) {
     const packages = packageNames(inputs.version, inputs.gfx, inputs.components, pm.kind);
     startGroup(`Configure the AMD ROCm ${pm.kind} repository`);
     await pm.ensurePrereqs();
@@ -34563,6 +34575,96 @@ async function installMultiArch(inputs, distro, pm = apt) {
     const prefix = installPrefix(inputs.version);
     requireHipcc(prefix);
     return prefix;
+}
+
+const KEY_PATH = '/etc/pki/rpm-gpg/RPM-GPG-KEY-amdrocm';
+const REPO_FILE_PATH = '/etc/yum.repos.d/amdrocm.repo';
+const REPO_ID = 'amdrocm';
+/**
+ * Every dnf call mus pas -y
+ */
+const DNF = ['dnf', '-y'];
+const NO_WEAK_DEPS = '--setopt=install_weak_deps=False';
+/**
+ * `gnupg2` provides the `gpg` the key check needs and is missing on
+ * almalinux:10; `ca-certificates` was present everywhere but is cheap to check.
+ */
+const DNF_PREREQS = ['ca-certificates', 'gnupg2'];
+/**
+ * What `hipcc` needs from the host to compile and link, and AMD's RPMs do not
+ * pull in. clang finds the C++ standard library through the GCC installation,
+ * and on EL the `libstdc++.so` it links against ships in `gcc-c++`: with only
+ * `gcc` + `libstdc++-devel`, almalinux:9 and :10 compile but fail to link
+ * ("unable to find library -lstdc++"). `gcc-c++` pulls in both. Installed in
+ * the same transaction as ROCm; dnf skips it where present.
+ */
+const HIPCC_HOST_PACKAGES = ['gcc-c++'];
+/** Whether `pkg` is installed according to rpm. Needs no root. */
+async function isRpmInstalled(pkg) {
+    const { exitCode } = await getExecOutput('rpm', ['-q', '--quiet', pkg], {
+        silent: true,
+        ignoreReturnCode: true
+    });
+    return exitCode === 0;
+}
+/** Install those of `packages` that are missing; no dnf call otherwise. */
+async function ensureRpmPackages(packages) {
+    const missing = [];
+    for (const pkg of packages)
+        if (!(await isRpmInstalled(pkg)))
+            missing.push(pkg);
+    if (missing.length === 0)
+        return;
+    info(`Installing missing prerequisites: ${missing.join(' ')}`);
+    await asRoot([...DNF, 'install', NO_WEAK_DEPS, ...missing]);
+}
+/** The .repo file for `distro` (e.g. rhel9), with both signature checks on. */
+function buildRepoFile(distro) {
+    return [
+        `[${REPO_ID}]`,
+        'name=AMD ROCm',
+        `baseurl=${repoUrl(distro, 'dnf')}`,
+        'enabled=1',
+        'gpgcheck=1',
+        'repo_gpgcheck=1',
+        `gpgkey=file://${KEY_PATH}`,
+        ''
+    ].join('\n');
+}
+const dnf = {
+    kind: 'dnf',
+    async ensurePrereqs() {
+        await ensureRpmPackages(DNF_PREREQS);
+    },
+    async addRepo(distro, keyFile) {
+        await asRoot(['install', '-D', '-m', '0644', keyFile, KEY_PATH]);
+        await asRoot(['rpm', '--import', KEY_PATH]);
+        const tmp = path$1.join(process.env['RUNNER_TEMP'] ?? os$1.tmpdir(), 'amdrocm.repo');
+        fs$1.writeFileSync(tmp, buildRepoFile(distro));
+        await asRoot(['install', '-m', '0644', tmp, REPO_FILE_PATH]);
+    },
+    async install(packages) {
+        // Fetch and verify the AMD metadata first -> chech signature
+        await asRoot([...DNF, 'makecache', '--repo', REPO_ID]);
+        await asRoot([
+            ...DNF,
+            'install',
+            NO_WEAK_DEPS,
+            ...packages,
+            ...HIPCC_HOST_PACKAGES
+        ]);
+    }
+};
+
+/**
+ * Package managers that have an install flow.
+ */
+const MANAGERS = {
+    apt,
+    dnf
+};
+function packageManagerFor(kind) {
+    return kind ? MANAGERS[kind] : undefined;
 }
 
 const FAMILIES = [
@@ -34671,11 +34773,18 @@ function makePlan(raw, detect) {
     const inputs = parseInputs(raw);
     const scheme = selectScheme(parseVersion(inputs.version));
     const platform = detect();
-    const pm = platform.packageManager;
-    if (platform.os === 'linux' && pm !== 'apt') {
-        throw new Error(`Detected ${platform.distro}, which uses ${pm ?? 'an unknown package manager'}. ` +
-            `This version of the action installs ROCm through apt only ` +
-            `(Ubuntu and Debian); ${platform.distro} is not supported yet.`);
+    if (platform.os === 'linux') {
+        const pm = platform.packageManager ?? 'an unknown package manager';
+        if (!packageManagerFor(platform.packageManager)) {
+            throw new Error(`Detected ${platform.distro}, which uses ${pm}. This version of the ` +
+                `action installs ROCm through apt (Ubuntu, Debian) and dnf (RHEL ` +
+                `family) only; ${platform.distro} is not supported yet.`);
+        }
+        if (scheme === 'legacy' && pm !== 'apt') {
+            throw new Error(`ROCm ${inputs.version} is not available on ${platform.distro}. ` +
+                `Versions 7.2.x and older are installed through AMD's Ubuntu ` +
+                `installer package; on ${platform.distro} use ROCm 10.0.0 or newer.`);
+        }
     }
     return { inputs, platform, scheme };
 }
@@ -34686,7 +34795,10 @@ async function run() {
         info(`Plan: ROCm ${plan.inputs.version} on ${plan.platform.os} ` +
             `(${plan.scheme}, gfx: ${plan.inputs.gfx.join(',') || 'all'})`);
         if (plan.platform.os === 'linux' && plan.scheme === 'multiarch') {
-            const root = await installMultiArch(plan.inputs, plan.platform.distro);
+            const pm = packageManagerFor(plan.platform.packageManager);
+            if (!pm)
+                throw new Error('No package manager for this distro.'); // makePlan checked
+            const root = await installMultiArch(plan.inputs, plan.platform.distro, pm);
             applyEnv(buildEnv(root, 'linux'), 'linux', plan.inputs.version);
             return;
         }

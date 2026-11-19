@@ -1,5 +1,5 @@
 import { codenameFor, legacyPackages, listingUrl } from './linux/legacy.js'
-import { REPO_BASE, packageNames } from './linux/packages.js'
+import { packageNames, repoUrl } from './linux/packages.js'
 import type { Plan } from './main.js'
 import { tarballUrl, windowsFamily } from './windows.js'
 
@@ -41,8 +41,13 @@ export function describePlan(plan: Plan): string[] {
     )
     lines.push(`Packages: ${legacyPackages(inputs.components).join(' ')}`)
   } else {
-    lines.push(`Repo:     ${REPO_BASE}/${platform.distro}`)
     const pm = platform.packageManager
+    lines.push(
+      `Repo:     ${safe(() => {
+        if (!pm) throw new Error('no package manager detected')
+        return repoUrl(platform.distro, pm)
+      })}`
+    )
     lines.push(
       `Packages: ${safe(() => {
         if (!pm) throw new Error('no package manager detected')
