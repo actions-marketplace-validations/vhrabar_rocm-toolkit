@@ -35,7 +35,16 @@ export function makePlan(
 ): Plan {
   const inputs = parseInputs(raw)
   const scheme = selectScheme(parseVersion(inputs.version))
-  return { inputs, platform: detect(), scheme }
+  const platform = detect()
+  const pm = platform.packageManager
+  if (platform.os === 'linux' && pm !== 'apt') {
+    throw new Error(
+      `Detected ${platform.distro}, which uses ${pm ?? 'an unknown package manager'}. ` +
+        `This version of the action installs ROCm through apt only ` +
+        `(Ubuntu and Debian); ${platform.distro} is not supported yet.`
+    )
+  }
+  return { inputs, platform, scheme }
 }
 
 export async function run(): Promise<void> {

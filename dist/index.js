@@ -34412,7 +34412,7 @@ async function downloadAndExtract(url, dest, fetcher) {
 /**
  * GPU target -> tarball family, Linux-only targets are not listed.
  */
-const FAMILIES = {
+const FAMILIES$1 = {
     gfx1010: 'gfx101X-dgpu',
     gfx1011: 'gfx101X-dgpu',
     gfx1012: 'gfx101X-dgpu',
@@ -34445,10 +34445,10 @@ function windowsFamily(gfx) {
         return MULTIARCH_FAMILY;
     const families = new Set();
     for (const target of gfx) {
-        const family = FAMILIES[target];
+        const family = FAMILIES$1[target];
         if (!family) {
             throw new Error(`There is no Windows build for GPU target "${target}". ` +
-                `Supported targets: ${Object.keys(FAMILIES).join(', ')}.`);
+                `Supported targets: ${Object.keys(FAMILIES$1).join(', ')}.`);
         }
         families.add(family);
     }
@@ -34506,10 +34506,41 @@ async function installWindows(inputs, fetcher = defaultFetcher) {
     return prefix;
 }
 
-const SUPPORTED_DISTROS = {
-    ubuntu: ['22.04', '24.04', '26.04'],
-    debian: ['12', '13']
-};
+const FAMILIES = [
+    {
+        repo: 'ubuntu',
+        packageManager: 'apt',
+        ids: ['ubuntu'],
+        match: 'exact',
+        versions: ['22.04', '24.04', '26.04']
+    },
+    {
+        repo: 'debian',
+        packageManager: 'apt',
+        ids: ['debian'],
+        match: 'exact',
+        versions: ['12', '13']
+    },
+    {
+        // Oracle Linux and UBI list only `fedora` in ID_LIKE, so they need their
+        // ID here. Fedora and Amazon Linux (also ID_LIKE=fedora) stay unsupported.
+        repo: 'rhel',
+        packageManager: 'dnf',
+        ids: ['rhel', 'almalinux', 'rocky', 'centos', 'ol'],
+        like: 'rhel',
+        match: 'major',
+        versions: ['8', '9', '10']
+    },
+    {
+        // Tumbleweed also matches `suse` but is rejected by its date VERSION_ID.
+        repo: 'sles',
+        packageManager: 'zypper',
+        ids: ['sles', 'opensuse-leap'],
+        like: 'suse',
+        match: 'major',
+        versions: ['15', '16']
+    }
+];
 function parseOsRelease(text) {
     const fields = new Map();
     for (const line of text.split('\n')) {
@@ -34520,20 +34551,35 @@ function parseOsRelease(text) {
     }
     return {
         id: fields.get('ID') ?? '',
+        idLike: (fields.get('ID_LIKE') ?? '').split(/\s+/).filter(Boolean),
         versionId: fields.get('VERSION_ID') ?? ''
     };
 }
-/** Map os-release data to the apt repo distro name, e.g. ubuntu2404. */
-function distroName(release) {
-    const versions = SUPPORTED_DISTROS[release.id];
-    if (!versions || !versions.includes(release.versionId)) {
-        const supported = Object.entries(SUPPORTED_DISTROS)
-            .map(([id, v]) => `${id} ${v.join('/')}`)
-            .join(', ');
-        throw new Error(`Unsupported distribution "${release.id} ${release.versionId}". ` +
-            `Supported: ${supported}.`);
+function findFamily(release) {
+    return (FAMILIES.find((f) => f.ids.includes(release.id)) ??
+        FAMILIES.find((f) => f.like && release.idLike.includes(f.like)));
+}
+function supportedList() {
+    return FAMILIES.map((f) => {
+        const others = f.ids.filter((id) => id !== f.repo);
+        const alias = others.length > 0 ? ` (also ${others.join(', ')})` : '';
+        return `${f.repo} ${f.versions.join('/')}${alias}`;
+    }).join('; ');
+}
+/** Map os-release data to the AMD repo directory and its package manager. */
+function resolveDistro(release) {
+    const family = findFamily(release);
+    const version = family?.match === 'major'
+        ? (release.versionId.split('.')[0] ?? '')
+        : release.versionId;
+    if (!family || !family.versions.includes(version)) {
+        const name = `${release.id} ${release.versionId}`.trim() || 'unknown';
+        throw new Error(`Unsupported distribution "${name}". Supported: ${supportedList()}.`);
     }
-    return `${release.id}${release.versionId.replace('.', '')}`;
+    return {
+        distro: `${family.repo}${version.replace('.', '')}`,
+        packageManager: family.packageManager
+    };
 }
 function osFromNodePlatform(nodePlatform) {
     if (nodePlatform === 'linux')
@@ -34546,7 +34592,7 @@ function detectPlatform(nodePlatform, arch, readOsRelease) {
     const os = osFromNodePlatform(nodePlatform);
     if (os === 'windows')
         return { os, arch, distro: '' };
-    return { os, arch, distro: distroName(parseOsRelease(readOsRelease())) };
+    return { os, arch, ...resolveDistro(parseOsRelease(readOsRelease())) };
 }
 
 function readRawInputs() {
@@ -34565,7 +34611,14 @@ function readRawInputs() {
 function makePlan(raw, detect) {
     const inputs = parseInputs(raw);
     const scheme = selectScheme(parseVersion(inputs.version));
-    return { inputs, platform: detect(), scheme };
+    const platform = detect();
+    const pm = platform.packageManager;
+    if (platform.os === 'linux' && pm !== 'apt') {
+        throw new Error(`Detected ${platform.distro}, which uses ${pm ?? 'an unknown package manager'}. ` +
+            `This version of the action installs ROCm through apt only ` +
+            `(Ubuntu and Debian); ${platform.distro} is not supported yet.`);
+    }
+    return { inputs, platform, scheme };
 }
 async function run() {
     try {

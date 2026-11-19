@@ -25,7 +25,12 @@ const raw = {
   useCache: 'true',
   logFileSuffix: 'log.txt'
 }
-const linux = { os: 'linux' as const, arch: 'x64', distro: 'ubuntu2404' }
+const linux = {
+  os: 'linux' as const,
+  arch: 'x64',
+  distro: 'ubuntu2404',
+  packageManager: 'apt' as const
+}
 
 describe('makePlan', () => {
   it('selects multiarch for 10.x', () => {
@@ -61,6 +66,24 @@ describe('run', () => {
     await run()
     expect(core.setFailed).toHaveBeenCalledWith(
       expect.stringMatching(/Invalid ROCm version|Unsupported/)
+    )
+  })
+})
+
+describe('makePlan on a distro without an install flow yet', () => {
+  it.each([
+    ['rhel9', 'dnf' as const],
+    ['sles15', 'zypper' as const]
+  ])('fails clearly on %s (%s)', (distro, packageManager) => {
+    expect(() =>
+      makePlan(raw, () => ({
+        os: 'linux',
+        arch: 'x64',
+        distro,
+        packageManager
+      }))
+    ).toThrow(
+      new RegExp(`Detected ${distro}, which uses ${packageManager}.*apt only`)
     )
   })
 })
