@@ -173,4 +173,8 @@ This is an independent project. "AMD", "ROCm" and "HIP" are trademarks of teh Ad
 
 Released under the MIT License. See [`LICENSE`](LICENSE).
 
+The MIT License above covers this project's own code. The bundled`dist/index.js` also contains third-party packages,
+which remain the copyright of their respective authors and are distributed under their own licenses. Their
+license notices are in [`dist/licenses.txt`](dist/licenses.txt), which is generated on every build.
+
 Copyright © 2026 Vedran Hrabar
