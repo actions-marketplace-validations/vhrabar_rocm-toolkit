@@ -18,6 +18,11 @@ const fsMock = {
 }
 jest.unstable_mockModule('@actions/core', () => core)
 jest.unstable_mockModule('@actions/exec', () => execMock)
+// Hosted-runner path: not root, sudo available.
+jest.unstable_mockModule('@actions/io', () => ({
+  which: jest.fn(async () => '/usr/bin/sudo')
+}))
+jest.spyOn(process, 'getuid').mockReturnValue(1001)
 jest.unstable_mockModule('@actions/tool-cache', () => tc)
 jest.unstable_mockModule('node:fs', () => ({ ...fsMock, default: fsMock }))
 

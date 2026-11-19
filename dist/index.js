@@ -34127,9 +34127,27 @@ function packageNames(version, gfx, components) {
     return [...new Set(names)];
 }
 
+/**
+ * Decide how to run privileged commands. Job containers usually run as root
+ * and ship no sudo, so run directly there; otherwise go through sudo.
+ */
+async function resolveElevation() {
+    if (process.getuid?.() === 0)
+        return 'direct';
+    if (await which('sudo', false))
+        return 'sudo';
+    throw new Error('Installing ROCm needs root privileges: run the job as root ' +
+        '(e.g. in a container) or make sudo available on the runner');
+}
 /** Run a command that needs root privileges. */
 async function asRoot(args) {
-    await exec('sudo', args);
+    const [cmd, ...rest] = args;
+    if (cmd === undefined)
+        throw new Error('asRoot: no command given');
+    if ((await resolveElevation()) === 'direct')
+        await exec(cmd, rest);
+    else
+        await exec('sudo', args);
 }
 
 const KEYRING_PATH = '/etc/apt/keyrings/amdrocm.gpg';
