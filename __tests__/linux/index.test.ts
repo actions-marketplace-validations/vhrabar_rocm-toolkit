@@ -22,25 +22,30 @@ jest.unstable_mockModule('@actions/exec', () => execMock)
 jest.unstable_mockModule('@actions/tool-cache', () => tc)
 jest.unstable_mockModule('node:fs', () => ({ ...fsMock, default: fsMock }))
 
-const linux = await import('../src/linux.js')
+const { installMultiArch } = await import('../../src/linux/index.js')
+const { buildSources } = await import('../../src/linux/apt.js')
+const { KEY_FINGERPRINT, parseFingerprints } =
+  await import('../../src/linux/key.js')
+const { packageNames } = await import('../../src/linux/packages.js')
+const { installPrefix, majorMinor } = await import('../../src/linux/prefix.js')
 
 const GOOD_KEY = `pub:-:4096:1:0701EAC4D5E02107:::::scESC:::::::
-fpr:::::::::${linux.KEY_FINGERPRINT}:
+fpr:::::::::${KEY_FINGERPRINT}:
 sub:-:4096:1:FA296B056C5BB456::::::s:::::::
 fpr:::::::::C367239A86C9B62AF49C921EFA296B056C5BB456:
 `
 
 describe('installPrefix / majorMinor', () => {
   it('uses MAJOR.MINOR only', () => {
-    expect(linux.majorMinor('10.1.0')).toBe('10.1')
-    expect(linux.installPrefix('10.1.0')).toBe('/opt/rocm/core-10.1')
-    expect(linux.installPrefix('10.0.0')).toBe('/opt/rocm/core-10.0')
+    expect(majorMinor('10.1.0')).toBe('10.1')
+    expect(installPrefix('10.1.0')).toBe('/opt/rocm/core-10.1')
+    expect(installPrefix('10.0.0')).toBe('/opt/rocm/core-10.0')
   })
 })
 
 describe('buildSources', () => {
   it('writes a deb822 stanza for the distro', () => {
-    expect(linux.buildSources('ubuntu2404')).toBe(
+    expect(buildSources('ubuntu2404')).toBe(
       [
         'Types: deb',
         'URIs: https://stable.repo.amd.com/rocm/core/packages/ubuntu2404',
@@ -56,14 +61,14 @@ describe('buildSources', () => {
 
 describe('packageNames', () => {
   it('builds per-gfx names for dev', () => {
-    expect(linux.packageNames('10.1.0', ['gfx1200'], ['dev'])).toEqual([
+    expect(packageNames('10.1.0', ['gfx1200'], ['dev'])).toEqual([
       'amdrocm-core-dev10.1-gfx1200'
     ])
   })
 
   it('expands components x gfx', () => {
     expect(
-      linux.packageNames('10.1.0', ['gfx1200', 'gfx90a'], ['runtime', 'sdk'])
+      packageNames('10.1.0', ['gfx1200', 'gfx90a'], ['runtime', 'sdk'])
     ).toEqual([
       'amdrocm10.1-gfx1200',
       'amdrocm10.1-gfx90a',
@@ -73,14 +78,14 @@ describe('packageNames', () => {
   })
 
   it('uses version-only names for all architectures', () => {
-    expect(linux.packageNames('10.1.0', [], ['dev'])).toEqual([
+    expect(packageNames('10.1.0', [], ['dev'])).toEqual([
       'amdrocm-core-dev10.1'
     ])
   })
 
   it('adds arch-independent extras once', () => {
     expect(
-      linux.packageNames(
+      packageNames(
         '10.1.0',
         ['gfx1200', 'gfx1201'],
         ['developer-tools', 'opencl']
@@ -91,8 +96,8 @@ describe('packageNames', () => {
 
 describe('parseFingerprints', () => {
   it('reads every fpr record', () => {
-    expect(linux.parseFingerprints(GOOD_KEY)).toEqual([
-      linux.KEY_FINGERPRINT,
+    expect(parseFingerprints(GOOD_KEY)).toEqual([
+      KEY_FINGERPRINT,
       'C367239A86C9B62AF49C921EFA296B056C5BB456'
     ])
   })
@@ -115,7 +120,7 @@ describe('installMultiArch', () => {
   })
 
   it('configures apt, installs packages and returns the prefix', async () => {
-    const prefix = await linux.installMultiArch(inputs, 'ubuntu2404')
+    const prefix = await installMultiArch(inputs, 'ubuntu2404')
     expect(prefix).toBe('/opt/rocm/core-10.1')
     const calls = execMock.exec.mock.calls.map(([cmd, args]) => [
       cmd,
@@ -151,7 +156,7 @@ describe('installMultiArch', () => {
     execMock.getExecOutput.mockResolvedValue({
       stdout: 'fpr:::::::::AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:\n'
     })
-    await expect(linux.installMultiArch(inputs, 'ubuntu2404')).rejects.toThrow(
+    await expect(installMultiArch(inputs, 'ubuntu2404')).rejects.toThrow(
       /does not match the expected fingerprint/
     )
     expect(execMock.exec).not.toHaveBeenCalled()
@@ -159,14 +164,14 @@ describe('installMultiArch', () => {
 
   it('fails when hipcc is missing after install', async () => {
     fsMock.existsSync.mockReturnValue(false)
-    await expect(linux.installMultiArch(inputs, 'ubuntu2404')).rejects.toThrow(
+    await expect(installMultiArch(inputs, 'ubuntu2404')).rejects.toThrow(
       /bin\/hipcc does not exist/
     )
   })
 
   it('stops on a failing apt command', async () => {
     execMock.exec.mockRejectedValueOnce(new Error('sudo failed'))
-    await expect(linux.installMultiArch(inputs, 'ubuntu2404')).rejects.toThrow(
+    await expect(installMultiArch(inputs, 'ubuntu2404')).rejects.toThrow(
       /sudo failed/
     )
   })

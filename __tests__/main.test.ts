@@ -9,10 +9,10 @@ jest.unstable_mockModule('@actions/core', () => core)
 jest.unstable_mockModule('../src/windows.js', () => ({
   installWindows: jest.fn()
 }))
-jest.unstable_mockModule('../src/legacy.js', () => ({
+jest.unstable_mockModule('../src/linux/legacy.js', () => ({
   installLegacy: jest.fn()
 }))
-jest.unstable_mockModule('../src/linux.js', () => ({
+jest.unstable_mockModule('../src/linux/index.js', () => ({
   installMultiArch: jest.fn()
 }))
 

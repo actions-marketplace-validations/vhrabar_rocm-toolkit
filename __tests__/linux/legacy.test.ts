@@ -21,7 +21,7 @@ jest.unstable_mockModule('@actions/exec', () => execMock)
 jest.unstable_mockModule('@actions/tool-cache', () => tc)
 jest.unstable_mockModule('node:fs', () => ({ ...fsMock, default: fsMock }))
 
-const legacy = await import('../src/legacy.js')
+const legacy = await import('../../src/linux/legacy.js')
 
 const LISTING = `<html><body>
 <a href="https://rocm.docs.amd.com/en/latest/">docs</a>

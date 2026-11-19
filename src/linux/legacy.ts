@@ -1,11 +1,13 @@
 import * as core from '@actions/core'
-import * as exec from '@actions/exec'
 import * as tc from '@actions/tool-cache'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import type { Component, Inputs } from './inputs.js'
-import { parseVersion } from './versions.js'
+import type { Component, Inputs } from '../inputs.js'
+import { parseVersion } from '../versions.js'
+import { APT_GET } from './apt.js'
+import { requireHipcc } from './prefix.js'
+import { asRoot } from './root.js'
 
 export const LEGACY_BASE = 'https://repo.radeon.com/amdgpu-install'
 
@@ -78,10 +80,6 @@ export function legacyPackages(components: readonly Component[]): string[] {
   ]
 }
 
-async function sudo(args: string[]): Promise<void> {
-  await exec.exec('sudo', args)
-}
-
 /** Install ROCm 7.2.x and older from repo.radeon.com. Returns the prefix. */
 export async function installLegacy(
   inputs: Inputs,
@@ -102,28 +100,27 @@ export async function installLegacy(
   core.info(`Found ${debName}`)
   core.endGroup()
 
-  const apt = ['env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get']
   core.startGroup('Configure the AMD ROCm apt repository')
   const debFile = await tc.downloadTool(
     `${base}${debName}`,
     path.join(process.env['RUNNER_TEMP'] ?? os.tmpdir(), debName)
   )
-  await sudo([...apt, 'install', '-y', debFile])
-  await sudo([...apt, 'update'])
+  await asRoot([...APT_GET, 'install', '-y', debFile])
+  await asRoot([...APT_GET, 'update'])
   core.endGroup()
 
   const packages = legacyPackages(inputs.components)
   core.startGroup(`Install ${packages.join(' ')}`)
-  await sudo([...apt, 'install', '-y', '--no-install-recommends', ...packages])
+  await asRoot([
+    ...APT_GET,
+    'install',
+    '-y',
+    '--no-install-recommends',
+    ...packages
+  ])
   core.endGroup()
 
   const prefix = legacyPrefix(inputs.version)
-  const hipcc = `${prefix}/bin/hipcc`
-  if (!fs.existsSync(hipcc)) {
-    throw new Error(
-      `Installation finished but ${hipcc} does not exist. ` +
-        `Include the "dev" or "sdk" component to get the compiler.`
-    )
-  }
+  requireHipcc(prefix)
   return prefix
 }
