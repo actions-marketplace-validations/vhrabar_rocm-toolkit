@@ -324,9 +324,9 @@ jobs:
           while IFS='|' read -r expect version gfx components; do
             [ -n "$expect" ] || continue
             echo "::group::version='$version' gfx='$gfx' components='$components'"
+            code=0
             out=$(INPUT_VERSION="$version" INPUT_GFX="$gfx" \
-              INPUT_COMPONENTS="$components" node dist/index.js 2>&1)
-            code=$?
+              INPUT_COMPONENTS="$components" node dist/index.js 2>&1) || code=$?
             echo "$out"
             echo "::endgroup::"
             if [ "$code" -eq 0 ]; then
