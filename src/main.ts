@@ -7,6 +7,7 @@ import { applyEnv, buildEnv } from './env.js'
 import { installLegacy } from './linux/legacy.js'
 import { installMultiArch } from './linux/index.js'
 import { packageManagerFor } from './linux/managers.js'
+import { installLinuxTarball } from './linux/tarball.js'
 import { installWindows } from './windows.js'
 import { detectPlatform, type Platform } from './platform.js'
 import { parseVersion, selectScheme, type Scheme } from './versions.js'
@@ -38,7 +39,15 @@ export function makePlan(
   const inputs = parseInputs(raw)
   const scheme = selectScheme(parseVersion(inputs.version))
   const platform = detect()
-  if (platform.os === 'linux') {
+  if (platform.os === 'linux' && platform.noPackageRepo) {
+    if (scheme === 'legacy') {
+      throw new Error(
+        `${platform.noPackageRepo} ROCm ${inputs.version} is only available ` +
+          `through AMD's package repos; on other distributions the action ` +
+          `installs the ROCm tarball, which exists for 10.0.0 and newer.`
+      )
+    }
+  } else if (platform.os === 'linux') {
     const pm = platform.packageManager ?? 'an unknown package manager'
     if (!packageManagerFor(platform.packageManager)) {
       throw new Error(
@@ -70,6 +79,14 @@ export async function run(): Promise<void> {
       `Plan: ROCm ${plan.inputs.version} on ${plan.platform.os} ` +
         `(${plan.scheme}, gfx: ${plan.inputs.gfx.join(',') || 'all'})`
     )
+    if (plan.platform.os === 'linux' && plan.platform.noPackageRepo) {
+      core.warning(
+        `${plan.platform.noPackageRepo} Installing the ROCm tarball instead.`
+      )
+      const root = await installLinuxTarball(plan.inputs)
+      applyEnv(buildEnv(root, 'linux'), 'linux', plan.inputs.version)
+      return
+    }
     if (plan.platform.os === 'linux' && plan.scheme === 'multiarch') {
       const pm = packageManagerFor(plan.platform.packageManager)
       if (!pm) throw new Error('No package manager for this distro.') // makePlan checked

@@ -31,6 +31,14 @@ exported variable is a breaking change.
   auto-imported, and the repository file turns on `gpgcheck`, `repo_gpgcheck`
   and `pkg_gpgcheck`. `gcc-c++` is installed with ROCm, as on RHEL. ROCm 7.2.x
   and older on SLES fail early with a clear message ([#18]).
+- **Linux, other distributions (ROCm 10.x):** on a distribution AMD publishes
+  no package repository for (Fedora, Arch, Amazon Linux, ...), the step now
+  installs AMD's Linux tarball instead of failing. It goes into
+  `/opt/rocm/core-X.Y` as root, otherwise under `RUNNER_TOOL_CACHE`, so no
+  root is needed. Needs glibc 2.28 or newer, and a C++ compiler and `python3`
+  from the user, which the step warns about when they are missing. Includes
+  the data-centre targets `gfx942`, `gfx950` and `gfx1250`. ROCm 7.2.x and
+  older on such distributions fail early with a clear message ([#19]).
 
 ## [1.0.0] - 2026-11-18
 
@@ -68,3 +76,4 @@ First release.
 [#15]: https://github.com/vhrabar/rocm-toolkit/issues/15
 [#17]: https://github.com/vhrabar/rocm-toolkit/issues/17
 [#18]: https://github.com/vhrabar/rocm-toolkit/issues/18
+[#19]: https://github.com/vhrabar/rocm-toolkit/issues/19

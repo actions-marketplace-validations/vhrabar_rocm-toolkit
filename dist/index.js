@@ -34355,6 +34355,64 @@ async function downloadAndExtract(url, dest, fetcher) {
 }
 
 /**
+ * GPU target -> tarball family. The client families are published for both
+ * Windows and Linux (stable.repo.amd.com/rocm/core/tarball/).
+ */
+const CLIENT_FAMILIES = {
+    gfx1010: 'gfx101X-dgpu',
+    gfx1011: 'gfx101X-dgpu',
+    gfx1012: 'gfx101X-dgpu',
+    gfx1030: 'gfx103X-all',
+    gfx1031: 'gfx103X-all',
+    gfx1032: 'gfx103X-all',
+    gfx1033: 'gfx103X-all',
+    gfx1034: 'gfx103X-all',
+    gfx1035: 'gfx103X-all',
+    gfx1036: 'gfx103X-all',
+    gfx1100: 'gfx110X-all',
+    gfx1101: 'gfx110X-all',
+    gfx1102: 'gfx110X-all',
+    gfx1103: 'gfx110X-all',
+    gfx1150: 'gfx1150',
+    gfx1151: 'gfx1151',
+    gfx1152: 'gfx1152',
+    gfx1153: 'gfx1153',
+    gfx1200: 'gfx120X-all',
+    gfx1201: 'gfx120X-all',
+    gfx908: 'gfx908',
+    gfx90a: 'gfx90a'
+};
+/**
+ * Data-centre families, published for Linux only. Each holds exactly the
+ * target mapped here, per the `.kpack/<lib>_<gfx>.kpack` files in its 10.1.0
+ * tarball.
+ */
+const DCGPU_FAMILIES = {
+    gfx942: 'gfx94X-dcgpu',
+    gfx950: 'gfx950-dcgpu',
+    gfx1250: 'gfx125X-dcgpu'
+};
+const MULTIARCH_FAMILY = 'multiarch';
+/**
+ * One family -> that tarball. No target ("all") or targets from several
+ * families -> the multiarch tarball, which contains them all.
+ */
+function selectFamily(gfx, families, platform) {
+    if (gfx.length === 0)
+        return MULTIARCH_FAMILY;
+    const selected = new Set();
+    for (const target of gfx) {
+        const family = families[target];
+        if (!family) {
+            throw new Error(`There is no ${platform} build for GPU target "${target}". ` +
+                `Supported targets: ${Object.keys(families).join(', ')}.`);
+        }
+        selected.add(family);
+    }
+    return selected.size === 1 ? [...selected][0] : MULTIARCH_FAMILY;
+}
+
+/**
  * Install a ROCm tarball into `prefix`, idempotently: an install with the
  * same stamp is kept, anything else in `prefix` is replaced.
  */
@@ -34385,50 +34443,75 @@ async function installTarball(target, fetcher) {
     fs$1.writeFileSync(marker, `${stamp}\n`);
 }
 
-/**
- * GPU target -> tarball family, Linux-only targets are not listed.
- */
-const FAMILIES$1 = {
-    gfx1010: 'gfx101X-dgpu',
-    gfx1011: 'gfx101X-dgpu',
-    gfx1012: 'gfx101X-dgpu',
-    gfx1030: 'gfx103X-all',
-    gfx1031: 'gfx103X-all',
-    gfx1032: 'gfx103X-all',
-    gfx1033: 'gfx103X-all',
-    gfx1034: 'gfx103X-all',
-    gfx1035: 'gfx103X-all',
-    gfx1036: 'gfx103X-all',
-    gfx1100: 'gfx110X-all',
-    gfx1101: 'gfx110X-all',
-    gfx1102: 'gfx110X-all',
-    gfx1103: 'gfx110X-all',
-    gfx1150: 'gfx1150',
-    gfx1151: 'gfx1151',
-    gfx1152: 'gfx1152',
-    gfx1153: 'gfx1153',
-    gfx1200: 'gfx120X-all',
-    gfx1201: 'gfx120X-all',
-    gfx908: 'gfx908',
-    gfx90a: 'gfx90a'
+/** Linux has the client families plus the data-centre ones. */
+const LINUX_FAMILIES = {
+    ...CLIENT_FAMILIES,
+    ...DCGPU_FAMILIES
 };
-const MULTIARCH_FAMILY = 'multiarch';
+function linuxFamily(gfx) {
+    return selectFamily(gfx, LINUX_FAMILIES, 'Linux');
+}
+function linuxTarballUrl(version, family) {
+    return `${TARBALL_BASE}/therock-dist-linux-${family}-${version}.tar.gz`;
+}
 /**
- * One family -> that tarball. No target ("all") or several families -> m-arch
+ * Where the tarball goes.
  */
-function windowsFamily(gfx) {
-    if (gfx.length === 0)
-        return MULTIARCH_FAMILY;
-    const families = new Set();
-    for (const target of gfx) {
-        const family = FAMILIES$1[target];
-        if (!family) {
-            throw new Error(`There is no Windows build for GPU target "${target}". ` +
-                `Supported targets: ${Object.keys(FAMILIES$1).join(', ')}.`);
-        }
-        families.add(family);
+function tarballPrefix(version, isRoot, toolCache) {
+    if (isRoot)
+        return installPrefix(version);
+    if (!toolCache) {
+        throw new Error('Installing the ROCm tarball without root needs RUNNER_TOOL_CACHE, ' +
+            'which is not set. Run the job as root or on a GitHub Actions runner.');
     }
-    return families.size === 1 ? [...families][0] : MULTIARCH_FAMILY;
+    return path$1.posix.join(toolCache, 'rocm', `core-${majorMinor(version)}`);
+}
+/** The system tar, not whatever is first on PATH. */
+const linuxFetcher = {
+    get: httpGet,
+    spawnTar: (args) => spawnTar('/usr/bin/tar', args)
+};
+/**
+ * What the tarball needs from the host and cannot bring along.
+ */
+async function hostToolWarnings() {
+    const warnings = [];
+    if (!(await which('c++', false))) {
+        warnings.push('No C++ compiler (c++) found on PATH. hipcc needs one to compile HIP ' +
+            'code: install it with the distro package manager, e.g. gcc-c++ on ' +
+            'Fedora, gcc on Arch.');
+    }
+    if (!(await which('python3', false))) {
+        warnings.push('python3 not found on PATH. hipcc --version and some ROCm tools need it.');
+    }
+    return warnings;
+}
+/**
+ * Install the ROCm 10.x Linux tarball, for distros without an AMD repo
+ * Returns the install prefix.
+ */
+async function installLinuxTarball(inputs, fetcher = linuxFetcher) {
+    const family = linuxFamily(inputs.gfx);
+    const prefix = tarballPrefix(inputs.version, process.getuid?.() === 0, process.env['RUNNER_TOOL_CACHE']);
+    if (inputs.components.some((c) => c !== 'dev')) {
+        warning('Input "components" has no effect with the tarball; it is installed ' +
+            'whole.');
+    }
+    for (const warning$1 of await hostToolWarnings())
+        warning(warning$1);
+    await installTarball({
+        url: linuxTarballUrl(inputs.version, family),
+        prefix,
+        hipcc: path$1.posix.join(prefix, 'bin', 'hipcc'),
+        stamp: `${family} ${inputs.version}`,
+        join: path$1.posix.join
+    }, fetcher);
+    return prefix;
+}
+
+/** Windows has the client families only. */
+function windowsFamily(gfx) {
+    return selectFamily(gfx, CLIENT_FAMILIES, 'Windows');
 }
 function tarballUrl(version, family) {
     return `${TARBALL_BASE}/therock-dist-windows-${family}-${version}.tar.gz`;
@@ -34487,6 +34570,11 @@ function describePlan(plan) {
     if (platform.os === 'windows') {
         lines.push(`Platform: windows ${platform.arch}`);
         lines.push(`Tarball:  ${safe(() => tarballUrl(inputs.version, windowsFamily(inputs.gfx)))}`);
+        return lines;
+    }
+    if (platform.noPackageRepo) {
+        lines.push(`Platform: linux ${platform.arch}, no AMD package repo (tarball)`);
+        lines.push(`Tarball:  ${safe(() => linuxTarballUrl(inputs.version, linuxFamily(inputs.gfx)))}`);
         return lines;
     }
     lines.push(`Platform: linux ${platform.arch}, ${platform.distro} ` +
@@ -34827,7 +34915,13 @@ function detectPlatform(nodePlatform, arch, readOsRelease) {
     const os = osFromNodePlatform(nodePlatform);
     if (os === 'windows')
         return { os, arch, distro: '' };
-    return { os, arch, ...resolveDistro(parseOsRelease(readOsRelease())) };
+    try {
+        return { os, arch, ...resolveDistro(parseOsRelease(readOsRelease())) };
+    }
+    catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return { os, arch, distro: '', noPackageRepo: reason };
+    }
 }
 
 function readRawInputs() {
@@ -34847,7 +34941,14 @@ function makePlan(raw, detect) {
     const inputs = parseInputs(raw);
     const scheme = selectScheme(parseVersion(inputs.version));
     const platform = detect();
-    if (platform.os === 'linux') {
+    if (platform.os === 'linux' && platform.noPackageRepo) {
+        if (scheme === 'legacy') {
+            throw new Error(`${platform.noPackageRepo} ROCm ${inputs.version} is only available ` +
+                `through AMD's package repos; on other distributions the action ` +
+                `installs the ROCm tarball, which exists for 10.0.0 and newer.`);
+        }
+    }
+    else if (platform.os === 'linux') {
         const pm = platform.packageManager ?? 'an unknown package manager';
         if (!packageManagerFor(platform.packageManager)) {
             throw new Error(`Detected ${platform.distro}, which uses ${pm}. This version of the ` +
@@ -34868,6 +34969,12 @@ async function run() {
         plan = makePlan(readRawInputs(), () => detectPlatform(process.platform, os$1.arch(), () => fs$1.readFileSync('/etc/os-release', 'utf8')));
         info(`Plan: ROCm ${plan.inputs.version} on ${plan.platform.os} ` +
             `(${plan.scheme}, gfx: ${plan.inputs.gfx.join(',') || 'all'})`);
+        if (plan.platform.os === 'linux' && plan.platform.noPackageRepo) {
+            warning(`${plan.platform.noPackageRepo} Installing the ROCm tarball instead.`);
+            const root = await installLinuxTarball(plan.inputs);
+            applyEnv(buildEnv(root, 'linux'), 'linux', plan.inputs.version);
+            return;
+        }
         if (plan.platform.os === 'linux' && plan.scheme === 'multiarch') {
             const pm = packageManagerFor(plan.platform.packageManager);
             if (!pm)

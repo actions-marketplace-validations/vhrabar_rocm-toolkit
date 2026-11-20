@@ -4,6 +4,7 @@ import type { Platform } from '../src/platform.js'
 const core = {
   getInput: jest.fn<(name: string) => string>(),
   info: jest.fn(),
+  warning: jest.fn(),
   setFailed: jest.fn()
 }
 jest.unstable_mockModule('@actions/core', () => core)
@@ -15,6 +16,10 @@ jest.unstable_mockModule('../src/linux/legacy.js', () => ({
 }))
 const installMultiArch = jest.fn<(...args: unknown[]) => Promise<string>>()
 jest.unstable_mockModule('../src/linux/index.js', () => ({ installMultiArch }))
+const installLinuxTarball = jest.fn<(...args: unknown[]) => Promise<string>>()
+jest.unstable_mockModule('../src/linux/tarball.js', () => ({
+  installLinuxTarball
+}))
 const failureMessage = jest.fn(
   (error: unknown, plan?: unknown) =>
     `${(error as Error).message}${plan ? ' [with context]' : ''}`
@@ -87,6 +92,32 @@ describe('run', () => {
     )
   })
 
+  it('falls back to the tarball with a warning when there is no AMD repo', async () => {
+    core.getInput.mockImplementation(
+      (name) => (raw as Record<string, string>)[name] ?? ''
+    )
+    const reason = 'Unsupported distribution "fedora 43". Supported: ...'
+    detectPlatform.mockReturnValue({
+      os: 'linux',
+      arch: 'x64',
+      distro: '',
+      noPackageRepo: reason
+    })
+    installLinuxTarball.mockRejectedValueOnce(new Error('stop here'))
+    await run()
+    expect(core.warning).toHaveBeenCalledWith(
+      `${reason} Installing the ROCm tarball instead.`
+    )
+    expect(installLinuxTarball).toHaveBeenCalledWith(
+      expect.objectContaining({ version: '10.1.0' })
+    )
+    expect(installMultiArch).not.toHaveBeenCalledWith(
+      expect.anything(),
+      '',
+      expect.anything()
+    )
+  })
+
   it('adds the install context when an install fails', async () => {
     core.getInput.mockImplementation(
       (name) => (raw as Record<string, string>)[name] ?? ''
@@ -149,6 +180,29 @@ describe('makePlan per package manager', () => {
       makePlan({ ...raw, version: '7.2.4' }, on('rhel8', 'dnf'))
     ).toThrow(
       /ROCm 7\.2\.4 is not available on rhel8\..*use ROCm 10\.0\.0 or newer/
+    )
+  })
+
+  it('accepts ROCm 10.x on a distro without an AMD repo', () => {
+    const plan = makePlan(raw, () => ({
+      os: 'linux',
+      arch: 'x64',
+      distro: '',
+      noPackageRepo: 'Unsupported distribution "arch".'
+    }))
+    expect(plan.scheme).toBe('multiarch')
+  })
+
+  it('rejects legacy versions on a distro without an AMD repo', () => {
+    expect(() =>
+      makePlan({ ...raw, version: '7.2.4' }, () => ({
+        os: 'linux',
+        arch: 'x64',
+        distro: '',
+        noPackageRepo: 'Unsupported distribution "fedora 43".'
+      }))
+    ).toThrow(
+      /Unsupported distribution "fedora 43"\. ROCm 7\.2\.4 is only available through AMD's package repos.*10\.0\.0 and newer/
     )
   })
 

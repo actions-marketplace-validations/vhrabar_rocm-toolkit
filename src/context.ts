@@ -1,5 +1,6 @@
 import { codenameFor, legacyPackages, listingUrl } from './linux/legacy.js'
 import { packageNames, repoUrl } from './linux/packages.js'
+import { linuxFamily, linuxTarballUrl } from './linux/tarball.js'
 import type { Plan } from './main.js'
 import { tarballUrl, windowsFamily } from './windows.js'
 
@@ -27,6 +28,16 @@ export function describePlan(plan: Plan): string[] {
     lines.push(`Platform: windows ${platform.arch}`)
     lines.push(
       `Tarball:  ${safe(() => tarballUrl(inputs.version, windowsFamily(inputs.gfx)))}`
+    )
+    return lines
+  }
+
+  if (platform.noPackageRepo) {
+    lines.push(
+      `Platform: linux ${platform.arch}, no AMD package repo (tarball)`
+    )
+    lines.push(
+      `Tarball:  ${safe(() => linuxTarballUrl(inputs.version, linuxFamily(inputs.gfx)))}`
     )
     return lines
   }

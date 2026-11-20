@@ -100,6 +100,24 @@ describe('describePlan', () => {
     ])
   })
 
+  it('lists the tarball URL on a distro without an AMD repo', () => {
+    expect(
+      describePlan({
+        ...multiarch,
+        platform: {
+          os: 'linux',
+          arch: 'x64',
+          distro: '',
+          noPackageRepo: 'Unsupported distribution "fedora 43".'
+        }
+      })
+    ).toEqual([
+      'ROCm:     10.1.0 (multiarch flow)',
+      'Platform: linux x64, no AMD package repo (tarball)',
+      'Tarball:  https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-gfx120X-all-10.1.0.tar.gz'
+    ])
+  })
+
   it('keeps going when a detail cannot be computed', () => {
     const lines = describePlan({
       ...multiarch,

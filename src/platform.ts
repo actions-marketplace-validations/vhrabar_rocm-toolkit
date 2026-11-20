@@ -8,6 +8,10 @@ export interface Platform {
   /** AMD repo directory on Linux, e.g. ubuntu2404. Empty on Windows. */
   distro: string
   packageManager?: PackageManagerKind
+  /**
+   * Set on Linux when AMD publishes no package repo for the distro -> tarball
+   */
+  noPackageRepo?: string
 }
 
 export interface OsRelease {
@@ -134,5 +138,10 @@ export function detectPlatform(
 ): Platform {
   const os = osFromNodePlatform(nodePlatform)
   if (os === 'windows') return { os, arch, distro: '' }
-  return { os, arch, ...resolveDistro(parseOsRelease(readOsRelease())) }
+  try {
+    return { os, arch, ...resolveDistro(parseOsRelease(readOsRelease())) }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    return { os, arch, distro: '', noPackageRepo: reason }
+  }
 }

@@ -186,6 +186,22 @@ describe('detectPlatform', () => {
     })
   })
 
+  it.each(['fedora-43', 'amazonlinux-2023', 'opensuse-tumbleweed'])(
+    'reports %s as having no AMD package repo instead of throwing',
+    (file) => {
+      const platform = detectPlatform('linux', 'x64', () => fixture(file))
+      expect(platform).toEqual({
+        os: 'linux',
+        arch: 'x64',
+        distro: '',
+        noPackageRepo: expect.stringMatching(
+          /^Unsupported distribution ".+"\. Supported: ubuntu /
+        )
+      })
+      expect(platform.packageManager).toBeUndefined()
+    }
+  )
+
   it('does not read os-release on windows', () => {
     const read = jest.fn<() => string>()
     expect(detectPlatform('win32', 'x64', read)).toEqual({

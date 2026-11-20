@@ -204,11 +204,17 @@ jobs:
             gfx: gfx1200
             rocm-path: /opt/rocm/core-10.1
             absent: sudo
-            checkout-setup: zypper --non-interactive install --no-recommends tar gzip
+            setup: zypper --non-interactive install --no-recommends tar gzip
+          - image: 'archlinux:latest'
+            version: '10.1.0'
+            gfx: gfx1200
+            rocm-path: /opt/rocm/core-10.1
+            absent: sudo
+            setup: pacman -Syu --noconfirm --needed gcc python
     steps:
-      - name: Tools for actions/checkout
-        if: matrix.checkout-setup
-        run: ${{ matrix.checkout-setup }}
+      - name: Prepare the image
+        if: matrix.setup
+        run: ${{ matrix.setup }}
       - uses: actions/checkout@v7.0.1
       - name: The image is bare (root, without ${{ matrix.absent }})
         env:

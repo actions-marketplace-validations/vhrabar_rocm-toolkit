@@ -146,10 +146,12 @@ The apt repository's signing key is checked against a pinned fingerprint before 
 | Debian 12, 13 | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, in containers only |
 | RHEL 8, 9, 10 and rebuilds (AlmaLinux, Rocky Linux, CentOS Stream, Oracle Linux, UBI) | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, in `manylinux_2_28`, `almalinux:9` and `almalinux:10` containers |
 | SLES 15, 16 and openSUSE Leap 15, 16 | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, in `bci-base:15.6`, `bci-base:16.0` and `opensuse/leap:15.6` containers |
+| Other Linux without an AMD package repo (Fedora, Arch, Amazon Linux, ...), glibc 2.28 or newer | 10.0.0, 10.1.0, from the tarball | 10.1.0, `gfx1200`, in an `archlinux:latest` container |
 | Ubuntu 22.04, 24.04 | 6.2.2, 7.0.1, 7.2.4 | 7.2.4 only, on runners and in containers |
 | Windows (`windows-2022`, `windows-2025`) | 10.0.0, 10.1.0 | 10.1.0, `gfx1200` |
 
 Every tested combination installs, runs `hipcc --version` and compiles a HIP program. On hosted runners CI also builds the library smoke project (compile and link only); in bare containers it does not, since they have no `cmake`.
+On a distribution without an AMD package repo the step warns and installs the ROCm tarball instead: into `/opt/rocm/core-X.Y` as root, otherwise under `RUNNER_TOOL_CACHE`. The tarball cannot bring a C++ compiler or `python3`, which `hipcc` needs, so install them first (e.g. `gcc-c++ python3` on Fedora, `gcc python` on Arch).
 On Linux the 10.x install adds about 10 GB of disk and takes about one to two minutes; on Windows it takes about 85 s and adds about 9 GB.
 
 A version outside the lis is rejected with a clear error. Windows supports ROCm 10.x only.
