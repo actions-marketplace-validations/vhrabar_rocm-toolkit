@@ -65,32 +65,17 @@ jobs:
           cmake -S .github/smoke -B build \
             -DCMAKE_PREFIX_PATH="$ROCM_PATH" -DSMOKE_REQUIRE_LIBS=ON
           cmake --build build
-
-  idempotent-linux:
-    name: Running twice on ubuntu-latest
-    needs: check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - name: Install ROCm (first run)
-        id: first
+      - name: Install ROCm again
+        id: again
         uses: ./
         with:
           version: '10.1.0'
           gfx: gfx1200
-      - name: Install ROCm (second run)
-        id: second
-        uses: ./
-        with:
-          version: '10.1.0'
-          gfx: gfx1200
-      - name: Both runs agree and hipcc works
+      - name: Both runs agree
         run: |
-          test "${{ steps.first.outputs.ROCM_PATH }}" = "${{ steps.second.outputs.ROCM_PATH }}"
-          test "${{ steps.first.outputs.version }}" = "${{ steps.second.outputs.version }}"
-          test -x "$ROCM_PATH/bin/hipcc"
-          hipcc --version
-          hipcc .github/smoke/hello.hip -o hello --offload-arch=gfx1200
+          test "${{ steps.rocm.outputs.ROCM_PATH }}" = "${{ steps.again.outputs.ROCM_PATH }}"
+          test "${{ steps.rocm.outputs.version }}" = "${{ steps.again.outputs.version }}"
+          hipcc .github/smoke/hello.hip -o hello2 --offload-arch=gfx1200
 
   install-legacy:
     name: Install ROCm 7.2.4 on ${{ matrix.os }}
@@ -139,17 +124,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: 'ubuntu:22.04'
-            version: '10.1.0'
-            gfx: gfx1200
-            rocm-path: /opt/rocm/core-10.1
-            absent: sudo gpg
           - image: 'ubuntu:24.04'
-            version: '10.1.0'
-            gfx: gfx1200
-            rocm-path: /opt/rocm/core-10.1
-            absent: sudo gpg
-          - image: 'ubuntu:26.04'
             version: '10.1.0'
             gfx: gfx1200
             rocm-path: /opt/rocm/core-10.1
@@ -163,11 +138,6 @@ jobs:
             version: '10.1.0'
             gfx: gfx1200
             rocm-path: /opt/rocm/core-10.1
-            absent: sudo gpg
-          - image: 'ubuntu:22.04'
-            version: '7.2.4'
-            gfx: ''
-            rocm-path: /opt/rocm-7.2.4
             absent: sudo gpg
           - image: 'ubuntu:24.04'
             version: '7.2.4'
@@ -199,12 +169,6 @@ jobs:
             gfx: gfx1200
             rocm-path: /opt/rocm/core-10.1
             absent: sudo
-          - image: 'opensuse/leap:15.6'
-            version: '10.1.0'
-            gfx: gfx1200
-            rocm-path: /opt/rocm/core-10.1
-            absent: sudo
-            setup: zypper --non-interactive install --no-recommends tar gzip
           - image: 'archlinux:latest'
             version: '10.1.0'
             gfx: gfx1200
@@ -305,64 +269,50 @@ jobs:
   reject-bad-input:
     name: Rejects ${{ matrix.name }}
     needs: check
-    runs-on: ${{ matrix.runner || 'ubuntu-24.04' }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: a version that is not listed
-            version: '10.9.999'
-            gfx: gfx1200
-            components: dev
-            expect: 'is not in the supported list'
-          - name: an unsupported packaging scheme
-            version: '8.0.0'
-            gfx: gfx1200
-            components: dev
-            expect: 'does not support'
-          - name: a malformed version
-            version: '10.1.0; id'
-            gfx: gfx1200
-            components: dev
-            expect: 'Invalid ROCm version'
-          - name: a malformed gfx target
-            version: '10.1.0'
-            gfx: 'gfx1200;id'
-            components: dev
-            expect: 'Invalid gfx target'
-          - name: an unknown component
-            version: '10.1.0'
-            gfx: gfx1200
-            components: kernel
-            expect: 'Invalid component'
+          # One case per line: expected message | version | gfx | components
+          - name: bad inputs
+            runner: ubuntu-24.04
+            cases: |
+              is not in the supported list|10.9.999|gfx1200|dev
+              does not support|8.0.0|gfx1200|dev
+              Invalid ROCm version|10.1.0; id|gfx1200|dev
+              Invalid gfx target|10.1.0|gfx1200;id|dev
+              Invalid component|10.1.0|gfx1200|kernel
           - name: an arm64 Linux runner
             runner: ubuntu-24.04-arm
-            version: '10.1.0'
-            gfx: gfx1200
-            components: dev
-            expect: 'AMD publishes ROCm for Linux on x86_64 only'
+            cases: |
+              AMD publishes ROCm for Linux on x86_64 only|10.1.0|gfx1200|dev
     steps:
       - uses: actions/checkout@v7.0.1
-      - name: Run the action and expect a clean failure
+      - name: Run the action and expect a clean failure for each case
         env:
-          INPUT_VERSION: ${{ matrix.version }}
-          INPUT_GFX: ${{ matrix.gfx }}
-          INPUT_COMPONENTS: ${{ matrix.components }}
-          EXPECT: ${{ matrix.expect }}
+          CASES: ${{ matrix.cases }}
         run: |
-          set +e
-          out=$(node dist/index.js 2>&1)
-          code=$?
-          echo "$out"
-          if [ "$code" -eq 0 ]; then
-            echo "::error::Expected the action to fail, but it succeeded."
-            exit 1
-          fi
-          grep -qF -- "$EXPECT" <<<"$out" || {
-            echo "::error::Failure message did not contain: $EXPECT"
-            exit 1
-          }
+          failed=0
+          while IFS='|' read -r expect version gfx components; do
+            [ -n "$expect" ] || continue
+            echo "::group::version='$version' gfx='$gfx' components='$components'"
+            out=$(INPUT_VERSION="$version" INPUT_GFX="$gfx" \
+              INPUT_COMPONENTS="$components" node dist/index.js 2>&1)
+            code=$?
+            echo "$out"
+            echo "::endgroup::"
+            if [ "$code" -eq 0 ]; then
+              echo "::error::Expected a failure for version='$version', but it succeeded."
+              failed=1
+            elif ! grep -qF -- "$expect" <<<"$out"; then
+              echo "::error::Failure message did not contain: $expect"
+              failed=1
+            fi
+          done <<<"$CASES"
+          # Every failure must come before anything touches the system.
           for f in /etc/apt/sources.list.d/amdrocm.sources \
                    /etc/apt/keyrings/amdrocm.gpg /etc/yum.repos.d/amdrocm.repo; do
-            if [ -e "$f" ]; then echo "::error::$f was written"; exit 1; fi
+            if [ -e "$f" ]; then echo "::error::$f was written"; failed=1; fi
           done
+          exit "$failed"

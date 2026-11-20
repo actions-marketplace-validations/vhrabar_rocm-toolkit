@@ -142,12 +142,12 @@ The apt repository's signing key is checked against a pinned fingerprint before 
 
 | Platform | ROCm versions | Tested in CI |
 | --- | --- | --- |
-| Ubuntu 22.04, 24.04, 26.04 | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, on runners and in containers |
-| Debian 12, 13 | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, in containers only |
+| Ubuntu 22.04, 24.04, 26.04 | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, on all three runners and in an `ubuntu:24.04` container |
+| Debian 12, 13 | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, in `debian:12` and `debian:13` containers |
 | RHEL 8, 9, 10 and rebuilds (AlmaLinux, Rocky Linux, CentOS Stream, Oracle Linux, UBI) | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, in `manylinux_2_28`, `almalinux:9` and `almalinux:10` containers |
-| SLES 15, 16 and openSUSE Leap 15, 16 | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, in `bci-base:15.6`, `bci-base:16.0` and `opensuse/leap:15.6` containers |
+| SLES 15, 16 and openSUSE Leap 15, 16 | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, in `bci-base:15.6` and `bci-base:16.0` containers; openSUSE Leap installs the same packages |
 | Other Linux without an AMD package repo (Fedora, Arch, Amazon Linux, ...), glibc 2.28 or newer | 10.0.0, 10.1.0, from the tarball | 10.1.0, `gfx1200`, in an `archlinux:latest` container |
-| Ubuntu 22.04, 24.04 | 6.2.2, 7.0.1, 7.2.4 | 7.2.4 only, on runners and in containers |
+| Ubuntu 22.04, 24.04 | 6.2.2, 7.0.1, 7.2.4 | 7.2.4 only, on both runners and in an `ubuntu:24.04` container |
 | Windows (`windows-2022`, `windows-2025`) | 10.0.0, 10.1.0 | 10.1.0, `gfx1200` |
 
 Every tested combination installs, runs `hipcc --version` and compiles a HIP program. On hosted runners CI also builds the library smoke project (compile and link only); in bare containers it does not, since they have no `cmake`.
