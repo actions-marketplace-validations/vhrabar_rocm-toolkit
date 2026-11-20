@@ -10,9 +10,10 @@ branding:
 inputs:
   version:
     description: >-
-      ROCm version to install, for example 10.1.0. Must be in the supported
-      list.
-    required: false
+      ROCm version to install, for example 10.2.0. Required: there is no
+      default, so a workflow never changes ROCm version on its own. Must be
+      in the supported list.
+    required: true
   gfx:
     description: >-
       GPU target(s), for example gfx1200. Comma-separated for several.

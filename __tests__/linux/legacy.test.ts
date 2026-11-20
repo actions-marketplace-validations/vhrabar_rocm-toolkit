@@ -7,21 +7,35 @@ const core = {
   warning: jest.fn()
 }
 const execMock = {
-  exec: jest.fn<(cmd: string, args?: string[]) => Promise<number>>()
+  exec: jest.fn<(cmd: string, args?: string[]) => Promise<number>>(),
+  getExecOutput:
+    jest.fn<
+      (
+        cmd: string,
+        args?: string[],
+        opts?: unknown
+      ) => Promise<{ exitCode: number; stdout: string }>
+    >()
 }
 const tc = {
   downloadTool: jest.fn<(url: string, dest?: string) => Promise<string>>()
 }
 const fsMock = {
   readFileSync: jest.fn<(p: string, enc: string) => string>(),
-  existsSync: jest.fn<(p: string) => boolean>()
+  existsSync: jest.fn<(p: string) => boolean>(),
+  rmSync: jest.fn<(p: string, opts?: unknown) => void>()
 }
 jest.unstable_mockModule('@actions/core', () => core)
 jest.unstable_mockModule('@actions/exec', () => execMock)
+// Hosted-runner path: not root, sudo available.
+jest.unstable_mockModule('@actions/io', () => ({
+  which: jest.fn(async () => '/usr/bin/sudo')
+}))
+jest.spyOn(process, 'getuid').mockReturnValue(1001)
 jest.unstable_mockModule('@actions/tool-cache', () => tc)
 jest.unstable_mockModule('node:fs', () => ({ ...fsMock, default: fsMock }))
 
-const legacy = await import('../src/legacy.js')
+const legacy = await import('../../src/linux/legacy.js')
 
 const LISTING = `<html><body>
 <a href="https://rocm.docs.amd.com/en/latest/">docs</a>
@@ -116,7 +130,15 @@ describe('installLegacy', () => {
     logFileSuffix: 'log.txt'
   }
 
+  let caCertsInstalled: boolean
+
   beforeEach(() => {
+    caCertsInstalled = true
+    execMock.getExecOutput.mockImplementation(async () =>
+      caCertsInstalled
+        ? { exitCode: 0, stdout: 'install ok installed' }
+        : { exitCode: 1, stdout: '' }
+    )
     process.env['RUNNER_TEMP'] = '/tmp'
     tc.downloadTool.mockImplementation(async (url, dest) =>
       url.endsWith('.deb') ? (dest as string) : '/tmp/listing.html'
@@ -150,6 +172,35 @@ describe('installLegacy', () => {
       ]
     ])
     expect(core.warning).not.toHaveBeenCalled()
+  })
+
+  it('installs ca-certificates first when it is missing', async () => {
+    caCertsInstalled = false
+    await legacy.installLegacy(inputs, 'ubuntu2404')
+    expect(execMock.getExecOutput).toHaveBeenCalledWith(
+      'dpkg-query',
+      ['-W', '-f=${Status}', 'ca-certificates'],
+      expect.anything()
+    )
+    const calls = execMock.exec.mock.calls.map(([c, a]) => [c, ...(a ?? [])])
+    const apt = ['sudo', 'env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get']
+    expect(calls.slice(0, 3)).toEqual([
+      [...apt, 'update'],
+      [...apt, 'install', '-y', '--no-install-recommends', 'ca-certificates'],
+      [...apt, 'install', '-y', '/tmp/amdgpu-install_7.2.4.70204-1_all.deb']
+    ])
+  })
+
+  it('removes a .deb left by an earlier run before downloading it', async () => {
+    await legacy.installLegacy(inputs, 'ubuntu2404')
+    const debPath = '/tmp/amdgpu-install_7.2.4.70204-1_all.deb'
+    expect(fsMock.rmSync).toHaveBeenCalledWith(debPath, { force: true })
+    const debDownload = tc.downloadTool.mock.calls.findIndex(([url]) =>
+      url.endsWith('.deb')
+    )
+    expect(fsMock.rmSync.mock.invocationCallOrder[0]).toBeLessThan(
+      tc.downloadTool.mock.invocationCallOrder[debDownload] ?? 0
+    )
   })
 
   it('warns that gfx is ignored', async () => {

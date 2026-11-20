@@ -1,4 +1,9 @@
-import { DEFAULT_VERSION, assertSupported, formatVersion } from './versions.js'
+import {
+  MULTIARCH_VERSIONS,
+  SUPPORTED_VERSIONS,
+  assertSupported,
+  formatVersion
+} from './versions.js'
 
 export const COMPONENTS = [
   'runtime',
@@ -79,7 +84,13 @@ export function parseBoolean(name: string, input: string): boolean {
 }
 
 export function parseInputs(raw: RawInputs): Inputs {
-  const version = formatVersion(assertSupported(raw.version || DEFAULT_VERSION))
+  if (!raw.version.trim()) {
+    throw new Error(
+      `Input "version" is required: pin the ROCm version to install, e.g. ` +
+        `${MULTIARCH_VERSIONS.at(-1)}. Supported: ${SUPPORTED_VERSIONS.join(', ')}.`
+    )
+  }
+  const version = formatVersion(assertSupported(raw.version))
   const suffix = raw.logFileSuffix.trim() || 'log.txt'
   if (!SUFFIX_PATTERN.test(suffix)) {
     throw new Error(`Invalid log-file-suffix "${suffix}".`)

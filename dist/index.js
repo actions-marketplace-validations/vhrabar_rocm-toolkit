@@ -38,8 +38,8 @@ import * as child from 'child_process';
 import { setTimeout as setTimeout$1 } from 'timers';
 import * as fs$1 from 'node:fs';
 import * as os$1 from 'node:os';
-import * as path$1 from 'node:path';
 import * as stream from 'stream';
+import * as path$1 from 'node:path';
 import { spawn } from 'node:child_process';
 import * as https$1 from 'node:https';
 import { pipeline } from 'node:stream/promises';
@@ -30461,14 +30461,17 @@ function endGroup() {
     issue('endgroup');
 }
 
-// Versions the action accepts.
-const MULTIARCH_VERSIONS = ['10.0.0', '10.1.0'];
+// Versions the action accepts
+const MULTIARCH_VERSIONS = [
+    '10.0.0',
+    '10.1.0',
+    '10.2.0'
+];
 const LEGACY_VERSIONS = ['6.2.2', '7.0.1', '7.2.4'];
 const SUPPORTED_VERSIONS = [
     ...LEGACY_VERSIONS,
     ...MULTIARCH_VERSIONS
 ];
-const DEFAULT_VERSION = MULTIARCH_VERSIONS.at(-1);
 const VERSION_PATTERN = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 function parseVersion(input) {
     const match = VERSION_PATTERN.exec(input.trim());
@@ -30559,7 +30562,11 @@ function parseBoolean(name, input) {
     throw new Error(`Input "${name}" must be "true" or "false", got "${input}".`);
 }
 function parseInputs(raw) {
-    const version = formatVersion(assertSupported(raw.version || DEFAULT_VERSION));
+    if (!raw.version.trim()) {
+        throw new Error(`Input "version" is required: pin the ROCm version to install, e.g. ` +
+            `${MULTIARCH_VERSIONS.at(-1)}. Supported: ${SUPPORTED_VERSIONS.join(', ')}.`);
+    }
+    const version = formatVersion(assertSupported(raw.version));
     const suffix = raw.logFileSuffix.trim() || 'log.txt';
     if (!SUFFIX_PATTERN.test(suffix)) {
         throw new Error(`Invalid log-file-suffix "${suffix}".`);
@@ -30571,38 +30578,6 @@ function parseInputs(raw) {
         useCache: parseBoolean('use-cache', raw.useCache || 'true'),
         logFileSuffix: suffix
     };
-}
-
-function buildEnv(root, os) {
-    const p = os === 'windows' ? path$1.win32 : path$1.posix;
-    const env = {
-        rocmPath: root,
-        hipPath: root,
-        binDir: p.join(root, 'bin'),
-        libDir: p.join(root, 'lib')
-    };
-    if (os === 'windows') {
-        env.deviceLibPath = p.join(root, 'lib', 'llvm', 'amdgcn', 'bitcode');
-    }
-    return env;
-}
-/** Prepend libDir to an existing LD_LIBRARY_PATH value without duplicates. */
-function mergeLibraryPath(libDir, existing) {
-    const parts = (existing ?? '').split(':').filter((s) => s.length > 0);
-    return [libDir, ...parts.filter((s) => s !== libDir)].join(':');
-}
-function applyEnv(env, os, version) {
-    exportVariable('ROCM_PATH', env.rocmPath);
-    exportVariable('HIP_PATH', env.hipPath);
-    if (env.deviceLibPath) {
-        exportVariable('HIP_DEVICE_LIB_PATH', env.deviceLibPath);
-    }
-    addPath(env.binDir);
-    if (os === 'linux') {
-        exportVariable('LD_LIBRARY_PATH', mergeLibraryPath(env.libDir, process.env['LD_LIBRARY_PATH']));
-    }
-    setOutput('ROCM_PATH', env.rocmPath);
-    setOutput('version', version);
 }
 
 var re = {exports: {}};
@@ -34076,6 +34051,182 @@ function _getGlobal(key, defaultValue) {
     return value !== undefined ? value : defaultValue;
 }
 
+/** Package-name suffix and install directory use MAJOR.MINOR only. */
+function majorMinor(version) {
+    const v = parseVersion(version);
+    return `${v.major}.${v.minor}`;
+}
+function installPrefix(version) {
+    return `/opt/rocm/core-${majorMinor(version)}`;
+}
+/** Fail unless the install left a compiler driver in `<prefix>/bin`. */
+function requireHipcc(prefix) {
+    const hipcc = path$1.posix.join(prefix, 'bin', 'hipcc');
+    if (!fs$1.existsSync(hipcc)) {
+        throw new Error(`Installation finished but ${hipcc} does not exist. ` +
+            `Include the "dev" or "sdk" component to get the compiler.`);
+    }
+}
+
+const REPO_BASE = 'https://stable.repo.amd.com/rocm/core/packages';
+/**
+ * Repo URL for `distro`, metadata is one step belowe
+ */
+function repoUrl(distro, kind) {
+    return kind === 'apt'
+        ? `${REPO_BASE}/${distro}`
+        : `${REPO_BASE}/${distro}/x86_64/`;
+}
+/**
+ * Name of the `dev` component's package. AMD follows each format's own
+ * convention: `-dev` for .deb, `-devel` for RPM (rhel8/9/10 and sles15/16
+ * listings).
+ */
+const DEV_PACKAGE = {
+    apt: 'amdrocm-core-dev',
+    dnf: 'amdrocm-core-devel',
+    zypper: 'amdrocm-core-devel'
+};
+/**
+ * Map components x gfx to the package names of `kind`. An empty gfx list
+ * means all architectures, which uses the version-only package names.
+ */
+function packageNames(version, gfx, components, kind) {
+    const mm = majorMinor(version);
+    const archs = gfx.length > 0 ? gfx.map((g) => `-${g}`) : [''];
+    const names = [];
+    for (const component of components) {
+        switch (component) {
+            case 'runtime':
+                for (const a of archs)
+                    names.push(`amdrocm${mm}${a}`);
+                break;
+            case 'dev':
+                for (const a of archs)
+                    names.push(`${DEV_PACKAGE[kind]}${mm}${a}`);
+                break;
+            case 'sdk':
+                for (const a of archs)
+                    names.push(`amdrocm-core-sdk${mm}${a}`);
+                break;
+            case 'developer-tools':
+                names.push(`amdrocm-developer-tools${mm}`);
+                break;
+            case 'opencl':
+                names.push(`amdrocm-opencl${mm}`);
+                break;
+        }
+    }
+    return [...new Set(names)];
+}
+
+/**
+ * Decide how to run privileged commands. Job containers usually run as root
+ * and ship no sudo, so run directly there; otherwise go through sudo.
+ */
+async function resolveElevation() {
+    if (process.getuid?.() === 0)
+        return 'direct';
+    if (await which('sudo', false))
+        return 'sudo';
+    throw new Error('Installing ROCm needs root privileges: run the job as root ' +
+        '(e.g. in a container) or make sudo available on the runner');
+}
+/** Run a command that needs root privileges. */
+async function asRoot(args) {
+    const [cmd, ...rest] = args;
+    if (cmd === undefined)
+        throw new Error('asRoot: no command given');
+    if ((await resolveElevation()) === 'direct')
+        await exec(cmd, rest);
+    else
+        await exec('sudo', args);
+}
+
+const KEYRING_PATH = '/etc/apt/keyrings/amdrocm.gpg';
+const SOURCES_PATH = '/etc/apt/sources.list.d/amdrocm.sources';
+const APT_GET = [
+    'env',
+    'DEBIAN_FRONTEND=noninteractive',
+    'apt-get'
+];
+/**
+ * Packages the multi-arch flow needs that bare container images lack:
+ * `gpg` for the key check and `--dearmor`, `ca-certificates` for apt.
+ */
+const APT_PREREQS = ['ca-certificates', 'gpg'];
+/** Whether `pkg` is installed according to dpkg. Needs no root. */
+async function isInstalled(pkg) {
+    const { exitCode, stdout } = await getExecOutput('dpkg-query', ['-W', '-f=${Status}', pkg], { silent: true, ignoreReturnCode: true });
+    return exitCode === 0 && stdout.trim() === 'install ok installed';
+}
+/**
+ * Install those of `packages` that are missing. Does nothing when all are
+ * present (hosted runners), so it only touches apt in bare containers.
+ * Without ca-certificates apt silently ignores https repos, so this must run
+ * before they are added rather than being inferred from a failure.
+ */
+async function ensurePackages(packages) {
+    const missing = [];
+    for (const pkg of packages)
+        if (!(await isInstalled(pkg)))
+            missing.push(pkg);
+    if (missing.length === 0)
+        return;
+    info(`Installing missing prerequisites: ${missing.join(' ')}`);
+    await asRoot([...APT_GET, 'update']);
+    await asRoot([
+        ...APT_GET,
+        'install',
+        '-y',
+        '--no-install-recommends',
+        ...missing
+    ]);
+}
+function buildSources(distro) {
+    return [
+        'Types: deb',
+        `URIs: ${repoUrl(distro, 'apt')}`,
+        'Suites: stable',
+        'Components: main',
+        'Architectures: amd64',
+        `Signed-By: ${KEYRING_PATH}`,
+        ''
+    ].join('\n');
+}
+const apt = {
+    kind: 'apt',
+    async ensurePrereqs() {
+        await ensurePackages(APT_PREREQS);
+    },
+    async addRepo(distro, keyFile) {
+        await asRoot(['mkdir', '-p', path$1.posix.dirname(KEYRING_PATH)]);
+        await asRoot([
+            'gpg',
+            '--batch',
+            '--yes',
+            '--dearmor',
+            '-o',
+            KEYRING_PATH,
+            keyFile
+        ]);
+        await asRoot(['chmod', '0644', KEYRING_PATH]);
+        const tmp = path$1.join(process.env['RUNNER_TEMP'] ?? os$1.tmpdir(), 'amdrocm.sources');
+        fs$1.writeFileSync(tmp, buildSources(distro));
+        await asRoot(['install', '-m', '0644', tmp, SOURCES_PATH]);
+    },
+    async install(packages) {
+        await asRoot([...APT_GET, 'update']);
+        await asRoot([
+            ...APT_GET,
+            'install',
+            '-y',
+            '--no-install-recommends',
+            ...packages
+        ]);
+    }
+};
+
 const LEGACY_BASE = 'https://repo.radeon.com/amdgpu-install';
 /** Ubuntu repo path segment -> codename used by repo.radeon.com. */
 const CODENAMES = {
@@ -34132,9 +34283,6 @@ function legacyPackages(components) {
         ...new Set([...components.map((c) => PACKAGES[c]), ...EXTRA_PACKAGES])
     ];
 }
-async function sudo$1(args) {
-    await exec('sudo', args);
-}
 /** Install ROCm 7.2.x and older from repo.radeon.com. Returns the prefix. */
 async function installLegacy(inputs, distro) {
     const codename = codenameFor(distro);
@@ -34148,193 +34296,31 @@ async function installLegacy(inputs, distro) {
     const debName = findInstallerDeb(fs$1.readFileSync(listingFile, 'utf8'));
     info(`Found ${debName}`);
     endGroup();
-    const apt = ['env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get'];
     startGroup('Configure the AMD ROCm apt repository');
-    const debFile = await downloadTool(`${base}${debName}`, path$1.join(process.env['RUNNER_TEMP'] ?? os$1.tmpdir(), debName));
-    await sudo$1([...apt, 'install', '-y', debFile]);
-    await sudo$1([...apt, 'update']);
+    const debPath = path$1.join(process.env['RUNNER_TEMP'] ?? os$1.tmpdir(), debName);
+    fs$1.rmSync(debPath, { force: true });
+    const debFile = await downloadTool(`${base}${debName}`, debPath);
+    await ensurePackages(['ca-certificates']);
+    await asRoot([...APT_GET, 'install', '-y', debFile]);
+    await asRoot([...APT_GET, 'update']);
     endGroup();
     const packages = legacyPackages(inputs.components);
     startGroup(`Install ${packages.join(' ')}`);
-    await sudo$1([...apt, 'install', '-y', '--no-install-recommends', ...packages]);
+    await asRoot([
+        ...APT_GET,
+        'install',
+        '-y',
+        '--no-install-recommends',
+        ...packages
+    ]);
     endGroup();
     const prefix = legacyPrefix(inputs.version);
-    const hipcc = `${prefix}/bin/hipcc`;
-    if (!fs$1.existsSync(hipcc)) {
-        throw new Error(`Installation finished but ${hipcc} does not exist. ` +
-            `Include the "dev" or "sdk" component to get the compiler.`);
-    }
-    return prefix;
-}
-
-const REPO_BASE = 'https://stable.repo.amd.com/rocm/core/packages';
-const KEY_URL = 'https://stable.repo.amd.com/rocm/gpg/packages.gpg';
-/** Primary key fingerprint of the AMD package signing key (see docs/RESEARCH.md). */
-const KEY_FINGERPRINT = 'D0F004A0025A1145C7807FCD0701EAC4D5E02107';
-const KEYRING_PATH = '/etc/apt/keyrings/amdrocm.gpg';
-const SOURCES_PATH = '/etc/apt/sources.list.d/amdrocm.sources';
-/** Package-name suffix and install directory use MAJOR.MINOR only. */
-function majorMinor(version) {
-    const v = parseVersion(version);
-    return `${v.major}.${v.minor}`;
-}
-function installPrefix(version) {
-    return `/opt/rocm/core-${majorMinor(version)}`;
-}
-function buildSources(distro) {
-    return [
-        'Types: deb',
-        `URIs: ${REPO_BASE}/${distro}`,
-        'Suites: stable',
-        'Components: main',
-        'Architectures: amd64',
-        `Signed-By: ${KEYRING_PATH}`,
-        ''
-    ].join('\n');
-}
-/**
- * Map components x gfx to apt package names. An empty gfx list means all
- * architectures, which uses the version-only package names.
- */
-function packageNames(version, gfx, components) {
-    const mm = majorMinor(version);
-    const archs = gfx.length > 0 ? gfx.map((g) => `-${g}`) : [''];
-    const names = [];
-    for (const component of components) {
-        switch (component) {
-            case 'runtime':
-                for (const a of archs)
-                    names.push(`amdrocm${mm}${a}`);
-                break;
-            case 'dev':
-                for (const a of archs)
-                    names.push(`amdrocm-core-dev${mm}${a}`);
-                break;
-            case 'sdk':
-                for (const a of archs)
-                    names.push(`amdrocm-core-sdk${mm}${a}`);
-                break;
-            case 'developer-tools':
-                names.push(`amdrocm-developer-tools${mm}`);
-                break;
-            case 'opencl':
-                names.push(`amdrocm-opencl${mm}`);
-                break;
-        }
-    }
-    return [...new Set(names)];
-}
-/** Extract fingerprints from `gpg --show-keys --with-colons` output. */
-function parseFingerprints(colonOutput) {
-    return colonOutput
-        .split('\n')
-        .filter((line) => line.startsWith('fpr:'))
-        .map((line) => line.split(':')[9] ?? '')
-        .filter((fpr) => fpr.length > 0);
-}
-async function sudo(args) {
-    await exec('sudo', args);
-}
-async function installKey() {
-    const keyFile = await downloadTool(KEY_URL);
-    const shown = await getExecOutput('gpg', ['--show-keys', '--with-colons', keyFile], { silent: true });
-    if (!parseFingerprints(shown.stdout).includes(KEY_FINGERPRINT)) {
-        throw new Error(`The downloaded AMD signing key does not match the expected fingerprint ` +
-            `${KEY_FINGERPRINT}. Refusing to trust it.`);
-    }
-    await sudo(['mkdir', '-p', path$1.posix.dirname(KEYRING_PATH)]);
-    await sudo([
-        'gpg',
-        '--batch',
-        '--yes',
-        '--dearmor',
-        '-o',
-        KEYRING_PATH,
-        keyFile
-    ]);
-    await sudo(['chmod', '0644', KEYRING_PATH]);
-}
-async function installSources(distro) {
-    const tmp = path$1.join(process.env['RUNNER_TEMP'] ?? os$1.tmpdir(), 'amdrocm.sources');
-    fs$1.writeFileSync(tmp, buildSources(distro));
-    await sudo(['install', '-m', '0644', tmp, SOURCES_PATH]);
-}
-/** Install ROCm 10.x from the multi-arch apt repo. Returns the install prefix. */
-async function installMultiArch(inputs, distro) {
-    const packages = packageNames(inputs.version, inputs.gfx, inputs.components);
-    startGroup('Configure the AMD ROCm apt repository');
-    await installKey();
-    await installSources(distro);
-    endGroup();
-    startGroup(`Install ${packages.join(' ')}`);
-    const apt = ['env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get'];
-    await sudo([...apt, 'update']);
-    await sudo([...apt, 'install', '-y', '--no-install-recommends', ...packages]);
-    endGroup();
-    const prefix = installPrefix(inputs.version);
-    const hipcc = path$1.posix.join(prefix, 'bin', 'hipcc');
-    if (!fs$1.existsSync(hipcc)) {
-        throw new Error(`Installation finished but ${hipcc} does not exist. ` +
-            `Include the "dev" or "sdk" component to get the compiler.`);
-    }
+    requireHipcc(prefix);
     return prefix;
 }
 
 const TARBALL_BASE = 'https://stable.repo.amd.com/rocm/core/tarball';
 const MARKER_FILE = '.setup-rocm';
-/**
- * GPU target -> tarball family, Linux-only targets are not listed.
- */
-const FAMILIES = {
-    gfx1010: 'gfx101X-dgpu',
-    gfx1011: 'gfx101X-dgpu',
-    gfx1012: 'gfx101X-dgpu',
-    gfx1030: 'gfx103X-all',
-    gfx1031: 'gfx103X-all',
-    gfx1032: 'gfx103X-all',
-    gfx1033: 'gfx103X-all',
-    gfx1034: 'gfx103X-all',
-    gfx1035: 'gfx103X-all',
-    gfx1036: 'gfx103X-all',
-    gfx1100: 'gfx110X-all',
-    gfx1101: 'gfx110X-all',
-    gfx1102: 'gfx110X-all',
-    gfx1103: 'gfx110X-all',
-    gfx1150: 'gfx1150',
-    gfx1151: 'gfx1151',
-    gfx1152: 'gfx1152',
-    gfx1153: 'gfx1153',
-    gfx1200: 'gfx120X-all',
-    gfx1201: 'gfx120X-all',
-    gfx908: 'gfx908',
-    gfx90a: 'gfx90a'
-};
-const MULTIARCH_FAMILY = 'multiarch';
-/**
- * One family -> that tarball. No target ("all") or several families -> m-arch
- */
-function windowsFamily(gfx) {
-    if (gfx.length === 0)
-        return MULTIARCH_FAMILY;
-    const families = new Set();
-    for (const target of gfx) {
-        const family = FAMILIES[target];
-        if (!family) {
-            throw new Error(`There is no Windows build for GPU target "${target}". ` +
-                `Supported targets: ${Object.keys(FAMILIES).join(', ')}.`);
-        }
-        families.add(family);
-    }
-    return families.size === 1 ? [...families][0] : MULTIARCH_FAMILY;
-}
-function tarballUrl(version, family) {
-    return `${TARBALL_BASE}/therock-dist-windows-${family}-${version}.tar.gz`;
-}
-/** C:\rocm\core-v */
-function windowsPrefix(version, drive = 'C:') {
-    const v = parseVersion(version);
-    return `${drive}\\rocm\\core-${v.major}.${v.minor}`;
-}
 function httpGet(url, redirects = 3) {
     return new Promise((resolve, reject) => {
         const request = https$1.get(url, (res) => {
@@ -34359,50 +34345,99 @@ function httpGet(url, redirects = 3) {
         request.on('error', reject);
     });
 }
-const defaultFetcher = {
-    get: httpGet,
-    spawnTar(args) {
-        const tar = path$1.win32.join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32', 'tar.exe');
-        const child = spawn(tar, args, { stdio: ['pipe', 'inherit', 'inherit'] });
-        const done = new Promise((resolve, reject) => {
-            child.on('error', reject);
-            child.on('close', (code) => code === 0
-                ? resolve()
-                : reject(new Error(`tar exited with code ${code}`)));
-        });
-        return { stdin: child.stdin, done };
-    }
-};
+/** Start `tar` at an absolute path with its stdin open for the archive. */
+function spawnTar(tar, args) {
+    const child = spawn(tar, args, { stdio: ['pipe', 'inherit', 'inherit'] });
+    const done = new Promise((resolve, reject) => {
+        child.on('error', reject);
+        child.on('close', (code) => code === 0 ? resolve() : reject(new Error(`tar exited with code ${code}`)));
+    });
+    return { stdin: child.stdin, done };
+}
 /** Stream the download straight into tar */
-async function downloadAndExtract(url, dest, fetcher = defaultFetcher) {
+async function downloadAndExtract(url, dest, fetcher) {
     const body = await fetcher.get(url);
     const tar = fetcher.spawnTar(['-xzf', '-', '-C', dest]);
     await Promise.all([pipeline(body, tar.stdin), tar.done]);
 }
-/** Install the ROCm 10.x tarball on Windows. Returns the install prefix. */
-async function installWindows(inputs, fetcher = defaultFetcher) {
-    const family = windowsFamily(inputs.gfx);
-    const prefix = windowsPrefix(inputs.version, process.env['SystemDrive']);
-    const hipcc = path$1.win32.join(prefix, 'bin', 'hipcc.exe');
-    const marker = path$1.win32.join(prefix, MARKER_FILE);
-    const stamp = `${family} ${inputs.version}`;
-    if (inputs.components.some((c) => c !== 'dev')) {
-        warning('Input "components" has no effect on Windows; the tarball is installed ' +
-            'whole.');
+
+/**
+ * GPU target -> tarball family. The client families are published for both
+ * Windows and Linux (stable.repo.amd.com/rocm/core/tarball/).
+ */
+const CLIENT_FAMILIES = {
+    gfx1010: 'gfx101X-dgpu',
+    gfx1011: 'gfx101X-dgpu',
+    gfx1012: 'gfx101X-dgpu',
+    gfx1030: 'gfx103X-all',
+    gfx1031: 'gfx103X-all',
+    gfx1032: 'gfx103X-all',
+    gfx1033: 'gfx103X-all',
+    gfx1034: 'gfx103X-all',
+    gfx1035: 'gfx103X-all',
+    gfx1036: 'gfx103X-all',
+    gfx1100: 'gfx110X-all',
+    gfx1101: 'gfx110X-all',
+    gfx1102: 'gfx110X-all',
+    gfx1103: 'gfx110X-all',
+    gfx1150: 'gfx1150',
+    gfx1151: 'gfx1151',
+    gfx1152: 'gfx1152',
+    gfx1153: 'gfx1153',
+    gfx1200: 'gfx120X-all',
+    gfx1201: 'gfx120X-all',
+    gfx908: 'gfx908',
+    gfx90a: 'gfx90a'
+};
+/**
+ * Data-centre families, published for Linux only. Each holds exactly the
+ * target mapped here, per the `.kpack/<lib>_<gfx>.kpack` files in its 10.1.0
+ * tarball.
+ */
+const DCGPU_FAMILIES = {
+    gfx942: 'gfx94X-dcgpu',
+    gfx950: 'gfx950-dcgpu',
+    gfx1250: 'gfx125X-dcgpu'
+};
+const MULTIARCH_FAMILY = 'multiarch';
+/**
+ * One family -> that tarball. No target ("all") or targets from several
+ * families -> the multiarch tarball, which contains them all.
+ */
+function selectFamily(gfx, families, platform) {
+    if (gfx.length === 0)
+        return MULTIARCH_FAMILY;
+    const selected = new Set();
+    for (const target of gfx) {
+        const family = families[target];
+        if (!family) {
+            throw new Error(`There is no ${platform} build for GPU target "${target}". ` +
+                `Supported targets: ${Object.keys(families).join(', ')}.`);
+        }
+        selected.add(family);
     }
+    return selected.size === 1 ? [...selected][0] : MULTIARCH_FAMILY;
+}
+
+/**
+ * Install a ROCm tarball into `prefix`, idempotently: an install with the
+ * same stamp is kept, anything else in `prefix` is replaced.
+ */
+async function installTarball(target, fetcher) {
+    const { url, prefix, hipcc, stamp } = target;
+    const marker = target.join(prefix, MARKER_FILE);
     const upToDate = fs$1.existsSync(hipcc) &&
         fs$1.existsSync(marker) &&
         fs$1.readFileSync(marker, 'utf8').trim() === stamp;
     if (upToDate) {
         info(`ROCm ${stamp} is already installed in ${prefix}`);
-        return prefix;
+        return;
     }
     if (fs$1.existsSync(prefix)) {
         info(`Removing the previous install in ${prefix}`);
         fs$1.rmSync(prefix, { recursive: true, force: true });
     }
     fs$1.mkdirSync(prefix, { recursive: true });
-    const url = tarballUrl(inputs.version, family);
     startGroup(`Download and extract ${url}`);
     const started = Date.now();
     await downloadAndExtract(url, prefix, fetcher);
@@ -34413,13 +34448,429 @@ async function installWindows(inputs, fetcher = defaultFetcher) {
             `The tarball layout may have changed.`);
     }
     fs$1.writeFileSync(marker, `${stamp}\n`);
+}
+
+/** Linux has the client families plus the data-centre ones. */
+const LINUX_FAMILIES = {
+    ...CLIENT_FAMILIES,
+    ...DCGPU_FAMILIES
+};
+function linuxFamily(gfx) {
+    return selectFamily(gfx, LINUX_FAMILIES, 'Linux');
+}
+function linuxTarballUrl(version, family) {
+    return `${TARBALL_BASE}/therock-dist-linux-${family}-${version}.tar.gz`;
+}
+/**
+ * Where the tarball goes.
+ */
+function tarballPrefix(version, isRoot, toolCache) {
+    if (isRoot)
+        return installPrefix(version);
+    if (!toolCache) {
+        throw new Error('Installing the ROCm tarball without root needs RUNNER_TOOL_CACHE, ' +
+            'which is not set. Run the job as root or on a GitHub Actions runner.');
+    }
+    return path$1.posix.join(toolCache, 'rocm', `core-${majorMinor(version)}`);
+}
+/** The system tar, not whatever is first on PATH. */
+const linuxFetcher = {
+    get: httpGet,
+    spawnTar: (args) => spawnTar('/usr/bin/tar', args)
+};
+/**
+ * What the tarball needs from the host and cannot bring along.
+ */
+async function hostToolWarnings() {
+    const warnings = [];
+    if (!(await which('c++', false))) {
+        warnings.push('No C++ compiler (c++) found on PATH. hipcc needs one to compile HIP ' +
+            'code: install it with the distro package manager, e.g. gcc-c++ on ' +
+            'Fedora, gcc on Arch.');
+    }
+    if (!(await which('python3', false))) {
+        warnings.push('python3 not found on PATH. hipcc --version and some ROCm tools need it.');
+    }
+    return warnings;
+}
+/**
+ * Install the ROCm 10.x Linux tarball, for distros without an AMD repo
+ * Returns the install prefix.
+ */
+async function installLinuxTarball(inputs, fetcher = linuxFetcher) {
+    const family = linuxFamily(inputs.gfx);
+    const prefix = tarballPrefix(inputs.version, process.getuid?.() === 0, process.env['RUNNER_TOOL_CACHE']);
+    if (inputs.components.some((c) => c !== 'dev')) {
+        warning('Input "components" has no effect with the tarball; it is installed ' +
+            'whole.');
+    }
+    for (const warning$1 of await hostToolWarnings())
+        warning(warning$1);
+    await installTarball({
+        url: linuxTarballUrl(inputs.version, family),
+        prefix,
+        hipcc: path$1.posix.join(prefix, 'bin', 'hipcc'),
+        stamp: `${family} ${inputs.version}`,
+        join: path$1.posix.join
+    }, fetcher);
     return prefix;
 }
 
-const SUPPORTED_DISTROS = {
-    ubuntu: ['22.04', '24.04', '26.04'],
-    debian: ['12', '13']
+/** Windows has the client families only. */
+function windowsFamily(gfx) {
+    return selectFamily(gfx, CLIENT_FAMILIES, 'Windows');
+}
+function tarballUrl(version, family) {
+    return `${TARBALL_BASE}/therock-dist-windows-${family}-${version}.tar.gz`;
+}
+/** C:\rocm\core-v */
+function windowsPrefix(version, drive = 'C:') {
+    const v = parseVersion(version);
+    return `${drive}\\rocm\\core-${v.major}.${v.minor}`;
+}
+const defaultFetcher = {
+    get: httpGet,
+    spawnTar(args) {
+        const tar = path$1.win32.join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32', 'tar.exe');
+        return spawnTar(tar, args);
+    }
 };
+/** Install the ROCm 10.x tarball on Windows. Returns the install prefix. */
+async function installWindows(inputs, fetcher = defaultFetcher) {
+    const family = windowsFamily(inputs.gfx);
+    const prefix = windowsPrefix(inputs.version, process.env['SystemDrive']);
+    const hipcc = path$1.win32.join(prefix, 'bin', 'hipcc.exe');
+    const stamp = `${family} ${inputs.version}`;
+    if (inputs.components.some((c) => c !== 'dev')) {
+        warning('Input "components" has no effect on Windows; the tarball is installed ' +
+            'whole.');
+    }
+    await installTarball({
+        url: tarballUrl(inputs.version, family),
+        prefix,
+        hipcc,
+        stamp,
+        join: path$1.win32.join
+    }, fetcher);
+    return prefix;
+}
+
+/**
+ * Evaluate `fn` for a context line. The flow has usually already thrown for
+ * the same reason, so a failure here must not hide the original error.
+ */
+function safe(fn) {
+    try {
+        return fn();
+    }
+    catch (error) {
+        return `(unknown: ${error instanceof Error ? error.message : String(error)})`;
+    }
+}
+/**
+ * What the action set out to do, built with the same helpers the install
+ * flows use, so a failure can be diagnosed from the message alone.
+ */
+function describePlan(plan) {
+    const { inputs, platform, scheme } = plan;
+    const lines = [`ROCm:     ${inputs.version} (${scheme} flow)`];
+    if (platform.os === 'windows') {
+        lines.push(`Platform: windows ${platform.arch}`);
+        lines.push(`Tarball:  ${safe(() => tarballUrl(inputs.version, windowsFamily(inputs.gfx)))}`);
+        return lines;
+    }
+    if (platform.noPackageRepo) {
+        lines.push(`Platform: linux ${platform.arch}, no AMD package repo (tarball)`);
+        lines.push(`Tarball:  ${safe(() => linuxTarballUrl(inputs.version, linuxFamily(inputs.gfx)))}`);
+        return lines;
+    }
+    lines.push(`Platform: linux ${platform.arch}, ${platform.distro} ` +
+        `(${platform.packageManager ?? 'unknown package manager'})`);
+    if (scheme === 'legacy') {
+        lines.push(`Installer from: ${safe(() => listingUrl(inputs.version, codenameFor(platform.distro)))}`);
+        lines.push(`Packages: ${legacyPackages(inputs.components).join(' ')}`);
+    }
+    else {
+        const pm = platform.packageManager;
+        lines.push(`Repo:     ${safe(() => {
+            if (!pm)
+                throw new Error('no package manager detected');
+            return repoUrl(platform.distro, pm);
+        })}`);
+        lines.push(`Packages: ${safe(() => {
+            if (!pm)
+                throw new Error('no package manager detected');
+            return packageNames(inputs.version, inputs.gfx, inputs.components, pm).join(' ');
+        })}`);
+    }
+    return lines;
+}
+/** The step's failure message: the error +plan. */
+function failureMessage(error, plan) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!plan)
+        return message;
+    return [message, '', 'Install context:', ...describePlan(plan)].join('\n');
+}
+
+function buildEnv(root, os) {
+    const p = os === 'windows' ? path$1.win32 : path$1.posix;
+    const env = {
+        rocmPath: root,
+        hipPath: root,
+        binDir: p.join(root, 'bin'),
+        libDir: p.join(root, 'lib')
+    };
+    if (os === 'windows') {
+        env.deviceLibPath = p.join(root, 'lib', 'llvm', 'amdgcn', 'bitcode');
+    }
+    return env;
+}
+/** Prepend libDir to an existing LD_LIBRARY_PATH value without duplicates. */
+function mergeLibraryPath(libDir, existing) {
+    const parts = (existing ?? '').split(':').filter((s) => s.length > 0);
+    return [libDir, ...parts.filter((s) => s !== libDir)].join(':');
+}
+function applyEnv(env, os, version) {
+    exportVariable('ROCM_PATH', env.rocmPath);
+    exportVariable('HIP_PATH', env.hipPath);
+    if (env.deviceLibPath) {
+        exportVariable('HIP_DEVICE_LIB_PATH', env.deviceLibPath);
+    }
+    addPath(env.binDir);
+    if (os === 'linux') {
+        exportVariable('LD_LIBRARY_PATH', mergeLibraryPath(env.libDir, process.env['LD_LIBRARY_PATH']));
+    }
+    setOutput('ROCM_PATH', env.rocmPath);
+    setOutput('version', version);
+}
+
+const KEY_URL = 'https://stable.repo.amd.com/rocm/gpg/packages.gpg';
+/** Primary key fingerprint of the AMD package signing key (see docs/RESEARCH.md). */
+const KEY_FINGERPRINT = 'D0F004A0025A1145C7807FCD0701EAC4D5E02107';
+/** Extract fingerprints from `gpg --show-keys --with-colons` output. */
+function parseFingerprints(colonOutput) {
+    return colonOutput
+        .split('\n')
+        .filter((line) => line.startsWith('fpr:'))
+        .map((line) => line.split(':')[9] ?? '')
+        .filter((fpr) => fpr.length > 0);
+}
+/**
+ * Download the AMD signing key and refuse it unless it carries the expected
+ * fingerprint. Returns the path of the ASCII-armored key file.
+ */
+async function fetchCheckedKey() {
+    const keyFile = await downloadTool(KEY_URL);
+    const shown = await getExecOutput('gpg', ['--show-keys', '--with-colons', keyFile], { silent: true });
+    if (!parseFingerprints(shown.stdout).includes(KEY_FINGERPRINT)) {
+        throw new Error(`The downloaded AMD signing key does not match the expected fingerprint ` +
+            `${KEY_FINGERPRINT}. Refusing to trust it.`);
+    }
+    return keyFile;
+}
+
+/**
+ * Install ROCm 10.x from the multi-arch package repo. The steps are the same
+ * on every distro; only the package manager differs. Returns the prefix.
+ */
+async function installMultiArch(inputs, distro, pm) {
+    const packages = packageNames(inputs.version, inputs.gfx, inputs.components, pm.kind);
+    startGroup(`Configure the AMD ROCm ${pm.kind} repository`);
+    await pm.ensurePrereqs();
+    await pm.addRepo(distro, await fetchCheckedKey());
+    endGroup();
+    startGroup(`Install ${packages.join(' ')}`);
+    await pm.install(packages);
+    endGroup();
+    const prefix = installPrefix(inputs.version);
+    requireHipcc(prefix);
+    return prefix;
+}
+
+/**
+ * What `hipcc` needs from the host to compile and link,
+ * and AMD's RPMs do not pull in.
+ */
+const HIPCC_HOST_PACKAGES = ['gcc-c++'];
+/** Whether `pkg` is installed according to rpm. Needs no root. */
+async function isRpmInstalled(pkg) {
+    const { exitCode } = await getExecOutput('rpm', ['-q', '--quiet', pkg], {
+        silent: true,
+        ignoreReturnCode: true
+    });
+    return exitCode === 0;
+}
+/** Those of `packages` that rpm does not report as installed, in order. */
+async function missingRpms(packages) {
+    const missing = [];
+    for (const pkg of packages)
+        if (!(await isRpmInstalled(pkg)))
+            missing.push(pkg);
+    return missing;
+}
+
+const KEY_PATH = '/etc/pki/rpm-gpg/RPM-GPG-KEY-amdrocm';
+const REPO_FILE_PATH$1 = '/etc/yum.repos.d/amdrocm.repo';
+const REPO_ID$1 = 'amdrocm';
+/**
+ * Every dnf call mus pas -y
+ */
+const DNF = ['dnf', '-y'];
+const NO_WEAK_DEPS = '--setopt=install_weak_deps=False';
+/**
+ * `gnupg2` provides the `gpg` the key check needs and is missing on
+ * almalinux:10; `ca-certificates` was present everywhere but is cheap to check.
+ */
+const DNF_PREREQS = ['ca-certificates', 'gnupg2'];
+/** Install those of `packages` that are missing; no dnf call otherwise. */
+async function ensureRpmPackages(packages) {
+    const missing = await missingRpms(packages);
+    if (missing.length === 0)
+        return;
+    info(`Installing missing prerequisites: ${missing.join(' ')}`);
+    await asRoot([...DNF, 'install', NO_WEAK_DEPS, ...missing]);
+}
+/** The .repo file for `distro` (e.g. rhel9), with both signature checks on. */
+function buildRepoFile$1(distro) {
+    return [
+        `[${REPO_ID$1}]`,
+        'name=AMD ROCm',
+        `baseurl=${repoUrl(distro, 'dnf')}`,
+        'enabled=1',
+        'gpgcheck=1',
+        'repo_gpgcheck=1',
+        `gpgkey=file://${KEY_PATH}`,
+        ''
+    ].join('\n');
+}
+const dnf = {
+    kind: 'dnf',
+    async ensurePrereqs() {
+        await ensureRpmPackages(DNF_PREREQS);
+    },
+    async addRepo(distro, keyFile) {
+        await asRoot(['install', '-D', '-m', '0644', keyFile, KEY_PATH]);
+        await asRoot(['rpm', '--import', KEY_PATH]);
+        const tmp = path$1.join(process.env['RUNNER_TEMP'] ?? os$1.tmpdir(), 'amdrocm.repo');
+        fs$1.writeFileSync(tmp, buildRepoFile$1(distro));
+        await asRoot(['install', '-m', '0644', tmp, REPO_FILE_PATH$1]);
+    },
+    async install(packages) {
+        // Fetch and verify the AMD metadata first -> chech signature
+        await asRoot([...DNF, 'makecache', '--repo', REPO_ID$1]);
+        await asRoot([
+            ...DNF,
+            'install',
+            NO_WEAK_DEPS,
+            ...packages,
+            ...HIPCC_HOST_PACKAGES
+        ]);
+    }
+};
+
+const REPO_FILE_PATH = '/etc/zypp/repos.d/amdrocm.repo';
+const REPO_ID = 'amdrocm';
+/** Never prompt: an unknown key or a conflict fails instead of hanging. */
+const ZYPPER = ['zypper', '--non-interactive'];
+const NO_RECOMMENDS = '--no-recommends';
+/**
+ * Present in every SLES 15/16 and openSUSE Leap image checked
+ * but cheap to verify fo SHRs
+ */
+const ZYPPER_PREREQS = ['ca-certificates', 'gpg2'];
+/**
+ * The repo definition for `distr'.
+ */
+function buildRepoFile(distro) {
+    return [
+        `[${REPO_ID}]`,
+        'name=AMD ROCm',
+        'enabled=1',
+        'autorefresh=1',
+        `baseurl=${repoUrl(distro, 'zypper')}`,
+        'type=rpm-md',
+        'gpgcheck=1',
+        'repo_gpgcheck=1',
+        'pkg_gpgcheck=1',
+        ''
+    ].join('\n');
+}
+const zypper = {
+    kind: 'zypper',
+    async ensurePrereqs() {
+        const missing = await missingRpms(ZYPPER_PREREQS);
+        if (missing.length === 0)
+            return;
+        info(`Installing missing prerequisites: ${missing.join(' ')}`);
+        await asRoot([...ZYPPER, 'install', NO_RECOMMENDS, ...missing]);
+    },
+    async addRepo(distro, keyFile) {
+        await asRoot(['rpm', '--import', keyFile]);
+        const tmp = path$1.join(process.env['RUNNER_TEMP'] ?? os$1.tmpdir(), 'amdrocm.repo');
+        fs$1.writeFileSync(tmp, buildRepoFile(distro));
+        await asRoot(['install', '-m', '0644', tmp, REPO_FILE_PATH]);
+    },
+    async install(packages) {
+        // Fetch and verify the AMD metadata first - > fail signature
+        await asRoot([...ZYPPER, 'refresh', REPO_ID]);
+        await asRoot([
+            ...ZYPPER,
+            'install',
+            NO_RECOMMENDS,
+            ...packages,
+            ...HIPCC_HOST_PACKAGES
+        ]);
+    }
+};
+
+/**
+ * Package managers that have an install flow.
+ */
+const MANAGERS = {
+    apt,
+    dnf,
+    zypper
+};
+function packageManagerFor(kind) {
+    return kind ? MANAGERS[kind] : undefined;
+}
+
+const FAMILIES = [
+    {
+        repo: 'ubuntu',
+        packageManager: 'apt',
+        ids: ['ubuntu'],
+        match: 'exact',
+        versions: ['22.04', '24.04', '26.04']
+    },
+    {
+        repo: 'debian',
+        packageManager: 'apt',
+        ids: ['debian'],
+        match: 'exact',
+        versions: ['12', '13']
+    },
+    {
+        // Oracle Linux and UBI list only `fedora` in ID_LIKE, so they need their
+        // ID here. Fedora and Amazon Linux (also ID_LIKE=fedora) stay unsupported.
+        repo: 'rhel',
+        packageManager: 'dnf',
+        ids: ['rhel', 'almalinux', 'rocky', 'centos', 'ol'],
+        like: 'rhel',
+        match: 'major',
+        versions: ['8', '9', '10']
+    },
+    {
+        // Tumbleweed also matches `suse` but is rejected by its date VERSION_ID.
+        repo: 'sles',
+        packageManager: 'zypper',
+        ids: ['sles', 'opensuse-leap'],
+        like: 'suse',
+        match: 'major',
+        versions: ['15', '16']
+    }
+];
 function parseOsRelease(text) {
     const fields = new Map();
     for (const line of text.split('\n')) {
@@ -34430,20 +34881,35 @@ function parseOsRelease(text) {
     }
     return {
         id: fields.get('ID') ?? '',
+        idLike: (fields.get('ID_LIKE') ?? '').split(/\s+/).filter(Boolean),
         versionId: fields.get('VERSION_ID') ?? ''
     };
 }
-/** Map os-release data to the apt repo distro name, e.g. ubuntu2404. */
-function distroName(release) {
-    const versions = SUPPORTED_DISTROS[release.id];
-    if (!versions || !versions.includes(release.versionId)) {
-        const supported = Object.entries(SUPPORTED_DISTROS)
-            .map(([id, v]) => `${id} ${v.join('/')}`)
-            .join(', ');
-        throw new Error(`Unsupported distribution "${release.id} ${release.versionId}". ` +
-            `Supported: ${supported}.`);
+function findFamily(release) {
+    return (FAMILIES.find((f) => f.ids.includes(release.id)) ??
+        FAMILIES.find((f) => f.like && release.idLike.includes(f.like)));
+}
+function supportedList() {
+    return FAMILIES.map((f) => {
+        const others = f.ids.filter((id) => id !== f.repo);
+        const alias = others.length > 0 ? ` (also ${others.join(', ')})` : '';
+        return `${f.repo} ${f.versions.join('/')}${alias}`;
+    }).join('; ');
+}
+/** Map os-release data to the AMD repo directory and its package manager. */
+function resolveDistro(release) {
+    const family = findFamily(release);
+    const version = family?.match === 'major'
+        ? (release.versionId.split('.')[0] ?? '')
+        : release.versionId;
+    if (!family || !family.versions.includes(version)) {
+        const name = `${release.id} ${release.versionId}`.trim() || 'unknown';
+        throw new Error(`Unsupported distribution "${name}". Supported: ${supportedList()}.`);
     }
-    return `${release.id}${release.versionId.replace('.', '')}`;
+    return {
+        distro: `${family.repo}${version.replace('.', '')}`,
+        packageManager: family.packageManager
+    };
 }
 function osFromNodePlatform(nodePlatform) {
     if (nodePlatform === 'linux')
@@ -34456,7 +34922,13 @@ function detectPlatform(nodePlatform, arch, readOsRelease) {
     const os = osFromNodePlatform(nodePlatform);
     if (os === 'windows')
         return { os, arch, distro: '' };
-    return { os, arch, distro: distroName(parseOsRelease(readOsRelease())) };
+    try {
+        return { os, arch, ...resolveDistro(parseOsRelease(readOsRelease())) };
+    }
+    catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return { os, arch, distro: '', noPackageRepo: reason };
+    }
 }
 
 function readRawInputs() {
@@ -34475,15 +34947,54 @@ function readRawInputs() {
 function makePlan(raw, detect) {
     const inputs = parseInputs(raw);
     const scheme = selectScheme(parseVersion(inputs.version));
-    return { inputs, platform: detect(), scheme };
+    const platform = detect();
+    // AMD publishes Linux ROCm for x86_64 only: amd64-only apt repos, x86_64/
+    // RPM repos, x86-64 tarballs (docs/RESEARCH.md). Check before the distro,
+    // so an arm64 Fedora does not fall back to an x86-64 tarball.
+    if (platform.os === 'linux' && platform.arch !== 'x64') {
+        throw new Error(`AMD publishes ROCm for Linux on x86_64 only, and this runner is ` +
+            `${platform.arch}. Use an x86_64 runner, e.g. ubuntu-24.04 instead ` +
+            `of ubuntu-24.04-arm.`);
+    }
+    if (platform.os === 'linux' && platform.noPackageRepo) {
+        if (scheme === 'legacy') {
+            throw new Error(`${platform.noPackageRepo} ROCm ${inputs.version} is only available ` +
+                `through AMD's package repos; on other distributions the action ` +
+                `installs the ROCm tarball, which exists for 10.0.0 and newer.`);
+        }
+    }
+    else if (platform.os === 'linux') {
+        const pm = platform.packageManager ?? 'an unknown package manager';
+        if (!packageManagerFor(platform.packageManager)) {
+            throw new Error(`Detected ${platform.distro}, which uses ${pm}. This version of the ` +
+                `action installs ROCm through apt (Ubuntu, Debian), dnf (RHEL ` +
+                `family) and zypper (SLES, openSUSE Leap) only.`);
+        }
+        if (scheme === 'legacy' && pm !== 'apt') {
+            throw new Error(`ROCm ${inputs.version} is not available on ${platform.distro}. ` +
+                `Versions 7.2.x and older are installed through AMD's Ubuntu ` +
+                `installer package; on ${platform.distro} use ROCm 10.0.0 or newer.`);
+        }
+    }
+    return { inputs, platform, scheme };
 }
 async function run() {
+    let plan;
     try {
-        const plan = makePlan(readRawInputs(), () => detectPlatform(process.platform, os$1.arch(), () => fs$1.readFileSync('/etc/os-release', 'utf8')));
+        plan = makePlan(readRawInputs(), () => detectPlatform(process.platform, os$1.arch(), () => fs$1.readFileSync('/etc/os-release', 'utf8')));
         info(`Plan: ROCm ${plan.inputs.version} on ${plan.platform.os} ` +
             `(${plan.scheme}, gfx: ${plan.inputs.gfx.join(',') || 'all'})`);
+        if (plan.platform.os === 'linux' && plan.platform.noPackageRepo) {
+            warning(`${plan.platform.noPackageRepo} Installing the ROCm tarball instead.`);
+            const root = await installLinuxTarball(plan.inputs);
+            applyEnv(buildEnv(root, 'linux'), 'linux', plan.inputs.version);
+            return;
+        }
         if (plan.platform.os === 'linux' && plan.scheme === 'multiarch') {
-            const root = await installMultiArch(plan.inputs, plan.platform.distro);
+            const pm = packageManagerFor(plan.platform.packageManager);
+            if (!pm)
+                throw new Error('No package manager for this distro.'); // makePlan checked
+            const root = await installMultiArch(plan.inputs, plan.platform.distro, pm);
             applyEnv(buildEnv(root, 'linux'), 'linux', plan.inputs.version);
             return;
         }
@@ -34504,7 +35015,7 @@ async function run() {
         throw new Error(`No install flow for ${plan.platform.os} / ${plan.scheme}.`);
     }
     catch (error) {
-        setFailed(error instanceof Error ? error.message : String(error));
+        setFailed(failureMessage(error, plan));
     }
 }
 

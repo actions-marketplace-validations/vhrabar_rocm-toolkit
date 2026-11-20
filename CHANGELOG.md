@@ -10,6 +10,41 @@ exported variable is a breaking change.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-20
+
+### Added
+
+- **Linux job containers:** the action works in bare Ubuntu and Debian
+  containers that run as root and ship no `sudo`. Privileged commands run
+  directly when the job is root and through `sudo` otherwise; if neither is
+  possible the step fails with a clear message. Missing `ca-certificates` and
+  `gpg` are installed first, and only when absent, so hosted runners are
+  unaffected ([#15]).
+- **Linux, RHEL 8, 9 and 10 (ROCm 10.x):** installs from AMD's RPM repository
+  with dnf, in `manylinux_2_28` and other RHEL-family containers. The signing
+  key is checked against the pinned fingerprint before `rpm --import`, and the
+  repository is set up with `gpgcheck=1` and `repo_gpgcheck=1`. Missing
+  `gnupg2` is installed first, and `gcc-c++` with ROCm, because `hipcc` needs
+  it to compile and link. ROCm 7.2.x and older on RHEL fail early with a clear
+  message ([#17]).
+- **Linux, SLES 15 and 16, openSUSE Leap (ROCm 10.x):** installs from AMD's
+  RPM repository with zypper, as root in SLES BCI and Leap containers. The
+  fingerprint-checked key is imported with `rpm --import`, never
+  auto-imported, and the repository file turns on `gpgcheck`, `repo_gpgcheck`
+  and `pkg_gpgcheck`. `gcc-c++` is installed with ROCm, as on RHEL. ROCm 7.2.x
+  and older on SLES fail early with a clear message ([#18]).
+- **Linux, other distributions (ROCm 10.x):** on a distribution AMD publishes
+  no package repository for (Fedora, Arch, Amazon Linux, ...), the step now
+  installs AMD's Linux tarball instead of failing. It goes into
+  `/opt/rocm/core-X.Y` as root, otherwise under `RUNNER_TOOL_CACHE`, so no
+  root is needed. Needs glibc 2.28 or newer, and a C++ compiler and `python3`
+  from the user, which the step warns about when they are missing. Includes
+  the data-centre targets `gfx942`, `gfx950` and `gfx1250`. ROCm 7.2.x and
+  older on such distributions fail early with a clear message ([#19]).
+- **ROCm 10.2.0** on every platform: Ubuntu, Debian, RHEL and SLES from AMD's
+  repositories, other Linux and Windows from the tarballs. It installs to
+  `/opt/rocm/core-10.2` and `C:\rocm\core-10.2` ([#22]).
+
 ## [1.0.0] - 2026-11-18
 
 First release.
@@ -41,5 +76,11 @@ First release.
   (compile and link only; hosted runners have no GPU). A `Check dist` workflow
   keeps the committed `dist/` bundle current.
 
-[Unreleased]: https://github.com/vhrabar/rocm-toolkit/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/vhrabar/rocm-toolkit/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/vhrabar/rocm-toolkit/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/vhrabar/rocm-toolkit/releases/tag/v1.0.0
+[#15]: https://github.com/vhrabar/rocm-toolkit/issues/15
+[#17]: https://github.com/vhrabar/rocm-toolkit/issues/17
+[#18]: https://github.com/vhrabar/rocm-toolkit/issues/18
+[#19]: https://github.com/vhrabar/rocm-toolkit/issues/19
+[#22]: https://github.com/vhrabar/rocm-toolkit/issues/22

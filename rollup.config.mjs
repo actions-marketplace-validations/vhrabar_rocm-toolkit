@@ -2,6 +2,7 @@ import commonjs from '@rollup/plugin-commonjs'
 import json from '@rollup/plugin-json'
 import nodeResolve from '@rollup/plugin-node-resolve'
 import typescript from '@rollup/plugin-typescript'
+import license from 'rollup-plugin-license'
 
 /** @type {import('rollup').RollupOptions} */
 export default {
@@ -23,6 +24,16 @@ export default {
     typescript({ tsconfig: './tsconfig.build.json' }),
     nodeResolve({ preferBuiltins: true }),
     commonjs(),
-    json()
+    json(),
+    // Bundled third-party code must ship with its license notices
+    license({
+      thirdParty: {
+        includePrivate: false,
+        includeSelf: false,
+        output: {
+          file: 'dist/licenses.txt'
+        }
+      }
+    })
   ]
 }

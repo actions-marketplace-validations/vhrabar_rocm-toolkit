@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals'
 import { EventEmitter } from 'node:events'
-import { PassThrough, Readable } from 'node:stream'
+import { PassThrough } from 'node:stream'
+import { fakeFetcher } from './helpers/fake-fetcher.js'
 
 const core = {
   startGroup: jest.fn(),
@@ -15,13 +16,7 @@ const fsMock = {
   mkdirSync: jest.fn(),
   rmSync: jest.fn()
 }
-const httpsGet =
-  jest.fn<(url: string, cb: (res: unknown) => void) => EventEmitter>()
 const spawnMock = jest.fn()
-jest.unstable_mockModule('node:https', () => ({
-  get: httpsGet,
-  default: { get: httpsGet }
-}))
 jest.unstable_mockModule('node:child_process', () => ({
   spawn: spawnMock,
   default: { spawn: spawnMock }
@@ -77,74 +72,6 @@ describe('tarballUrl / windowsPrefix', () => {
   it('uses MAJOR.MINOR in the install directory', () => {
     expect(windows.windowsPrefix('10.1.0')).toBe(PREFIX)
     expect(windows.windowsPrefix('10.0.0', 'D:')).toBe('D:\\rocm\\core-10.0')
-  })
-})
-
-interface FakeFetcher {
-  fetcher: {
-    get: jest.Mock<(url: string) => Promise<Readable>>
-    spawnTar: jest.Mock<
-      (args: string[]) => { stdin: PassThrough; done: Promise<void> }
-    >
-  }
-  received: Buffer[]
-  calls: { url?: string; args?: string[] }
-}
-
-function fakeFetcher(options: {
-  body?: Readable
-  tarExit?: 'ok' | 'fail'
-}): FakeFetcher {
-  const received: Buffer[] = []
-  const stdin = new PassThrough()
-  stdin.on('data', (chunk: Buffer) => received.push(chunk))
-  const calls: { url?: string; args?: string[] } = {}
-  const fetcher = {
-    get: jest.fn(async (url: string) => {
-      calls.url = url
-      return options.body ?? Readable.from([Buffer.from('tar-bytes')])
-    }),
-    spawnTar: jest.fn((args: string[]) => {
-      calls.args = args
-      const done = new Promise<void>((resolve, reject) => {
-        stdin.on('end', () =>
-          options.tarExit === 'fail'
-            ? reject(new Error('tar exited with code 1'))
-            : resolve()
-        )
-      })
-      return { stdin, done }
-    })
-  }
-  return { fetcher, received, calls }
-}
-
-describe('downloadAndExtract', () => {
-  it('streams the body into tar with the right arguments', async () => {
-    const { fetcher, received, calls } = fakeFetcher({})
-    await windows.downloadAndExtract('https://x/y.tar.gz', 'C:\\dest', fetcher)
-    expect(calls.url).toBe('https://x/y.tar.gz')
-    expect(calls.args).toEqual(['-xzf', '-', '-C', 'C:\\dest'])
-    expect(Buffer.concat(received).toString()).toBe('tar-bytes')
-  })
-
-  it('fails when tar fails', async () => {
-    const { fetcher } = fakeFetcher({ tarExit: 'fail' })
-    await expect(
-      windows.downloadAndExtract('https://x/y.tar.gz', 'C:\\dest', fetcher)
-    ).rejects.toThrow(/tar exited with code 1/)
-  })
-
-  it('fails when the download breaks halfway', async () => {
-    const body = new Readable({
-      read(): void {
-        this.destroy(new Error('connection reset'))
-      }
-    })
-    const { fetcher } = fakeFetcher({ body })
-    await expect(
-      windows.downloadAndExtract('https://x/y.tar.gz', 'C:\\dest', fetcher)
-    ).rejects.toThrow(/connection reset/)
   })
 })
 
@@ -244,70 +171,6 @@ describe('installWindows', () => {
     expect(core.warning).toHaveBeenCalledWith(
       expect.stringMatching(/components/)
     )
-  })
-})
-
-function fakeResponse(status: number, location?: string): Readable {
-  const res = Readable.from([]) as Readable & {
-    statusCode: number
-    headers: Record<string, string>
-    setTimeout: jest.Mock
-  }
-  res.statusCode = status
-  res.headers = location ? { location } : {}
-  res.setTimeout = jest.fn()
-  return res
-}
-
-function respondWith(...responses: Readable[]): void {
-  httpsGet.mockReset()
-  for (const res of responses) {
-    httpsGet.mockImplementationOnce((_url, cb) => {
-      queueMicrotask(() => cb(res))
-      return new EventEmitter()
-    })
-  }
-}
-
-describe('httpGet', () => {
-  it('resolves with the response on 200', async () => {
-    const ok = fakeResponse(200)
-    respondWith(ok)
-    await expect(windows.httpGet('https://x/a')).resolves.toBe(ok)
-  })
-
-  it('fails with the status code on 404', async () => {
-    respondWith(fakeResponse(404))
-    await expect(windows.httpGet('https://x/a')).rejects.toThrow(/HTTP 404/)
-  })
-
-  it('follows a relative redirect', async () => {
-    const ok = fakeResponse(200)
-    respondWith(fakeResponse(302, '/b/file.tar.gz'), ok)
-    await expect(windows.httpGet('https://x/a')).resolves.toBe(ok)
-    expect(httpsGet.mock.calls[1]?.[0]).toBe('https://x/b/file.tar.gz')
-  })
-
-  it('gives up after too many redirects', async () => {
-    respondWith(
-      fakeResponse(302, '/1'),
-      fakeResponse(302, '/2'),
-      fakeResponse(302, '/3'),
-      fakeResponse(302, '/4')
-    )
-    await expect(windows.httpGet('https://x/a')).rejects.toThrow(
-      /Too many redirects/
-    )
-  })
-
-  it('rejects on a connection error', async () => {
-    httpsGet.mockReset()
-    httpsGet.mockImplementationOnce(() => {
-      const req = new EventEmitter()
-      queueMicrotask(() => req.emit('error', new Error('ENOTFOUND')))
-      return req
-    })
-    await expect(windows.httpGet('https://x/a')).rejects.toThrow(/ENOTFOUND/)
   })
 })
 
