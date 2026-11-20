@@ -10,6 +10,8 @@ exported variable is a breaking change.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-20
+
 ### Added
 
 - **Linux job containers:** the action works in bare Ubuntu and Debian
@@ -39,6 +41,9 @@ exported variable is a breaking change.
   from the user, which the step warns about when they are missing. Includes
   the data-centre targets `gfx942`, `gfx950` and `gfx1250`. ROCm 7.2.x and
   older on such distributions fail early with a clear message ([#19]).
+- **ROCm 10.2.0** on every platform: Ubuntu, Debian, RHEL and SLES from AMD's
+  repositories, other Linux and Windows from the tarballs. It installs to
+  `/opt/rocm/core-10.2` and `C:\rocm\core-10.2` ([#22]).
 
 ## [1.0.0] - 2026-11-18
 
@@ -71,9 +76,11 @@ First release.
   (compile and link only; hosted runners have no GPU). A `Check dist` workflow
   keeps the committed `dist/` bundle current.
 
-[Unreleased]: https://github.com/vhrabar/rocm-toolkit/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/vhrabar/rocm-toolkit/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/vhrabar/rocm-toolkit/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/vhrabar/rocm-toolkit/releases/tag/v1.0.0
 [#15]: https://github.com/vhrabar/rocm-toolkit/issues/15
 [#17]: https://github.com/vhrabar/rocm-toolkit/issues/17
 [#18]: https://github.com/vhrabar/rocm-toolkit/issues/18
 [#19]: https://github.com/vhrabar/rocm-toolkit/issues/19
+[#22]: https://github.com/vhrabar/rocm-toolkit/issues/22
