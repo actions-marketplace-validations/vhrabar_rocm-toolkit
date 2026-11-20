@@ -1,15 +1,13 @@
 import * as core from '@actions/core'
-import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { Inputs } from './inputs.js'
 import {
-  MARKER_FILE,
   TARBALL_BASE,
-  downloadAndExtract,
   httpGet,
   spawnTar,
   type Fetcher
 } from './tarball/download.js'
+import { installTarball } from './tarball/install.js'
 import { parseVersion } from './versions.js'
 
 /**
@@ -91,7 +89,6 @@ export async function installWindows(
   const family = windowsFamily(inputs.gfx)
   const prefix = windowsPrefix(inputs.version, process.env['SystemDrive'])
   const hipcc = path.win32.join(prefix, 'bin', 'hipcc.exe')
-  const marker = path.win32.join(prefix, MARKER_FILE)
   const stamp = `${family} ${inputs.version}`
 
   if (inputs.components.some((c) => c !== 'dev')) {
@@ -101,34 +98,15 @@ export async function installWindows(
     )
   }
 
-  const upToDate =
-    fs.existsSync(hipcc) &&
-    fs.existsSync(marker) &&
-    fs.readFileSync(marker, 'utf8').trim() === stamp
-  if (upToDate) {
-    core.info(`ROCm ${stamp} is already installed in ${prefix}`)
-    return prefix
-  }
-
-  if (fs.existsSync(prefix)) {
-    core.info(`Removing the previous install in ${prefix}`)
-    fs.rmSync(prefix, { recursive: true, force: true })
-  }
-  fs.mkdirSync(prefix, { recursive: true })
-
-  const url = tarballUrl(inputs.version, family)
-  core.startGroup(`Download and extract ${url}`)
-  const started = Date.now()
-  await downloadAndExtract(url, prefix, fetcher)
-  core.info(`Done in ${Math.round((Date.now() - started) / 1000)} s`)
-  core.endGroup()
-
-  if (!fs.existsSync(hipcc)) {
-    throw new Error(
-      `Extraction finished but ${hipcc} does not exist. ` +
-        `The tarball layout may have changed.`
-    )
-  }
-  fs.writeFileSync(marker, `${stamp}\n`)
+  await installTarball(
+    {
+      url: tarballUrl(inputs.version, family),
+      prefix,
+      hipcc,
+      stamp,
+      join: path.win32.join
+    },
+    fetcher
+  )
   return prefix
 }

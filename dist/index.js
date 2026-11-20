@@ -34355,6 +34355,37 @@ async function downloadAndExtract(url, dest, fetcher) {
 }
 
 /**
+ * Install a ROCm tarball into `prefix`, idempotently: an install with the
+ * same stamp is kept, anything else in `prefix` is replaced.
+ */
+async function installTarball(target, fetcher) {
+    const { url, prefix, hipcc, stamp } = target;
+    const marker = target.join(prefix, MARKER_FILE);
+    const upToDate = fs$1.existsSync(hipcc) &&
+        fs$1.existsSync(marker) &&
+        fs$1.readFileSync(marker, 'utf8').trim() === stamp;
+    if (upToDate) {
+        info(`ROCm ${stamp} is already installed in ${prefix}`);
+        return;
+    }
+    if (fs$1.existsSync(prefix)) {
+        info(`Removing the previous install in ${prefix}`);
+        fs$1.rmSync(prefix, { recursive: true, force: true });
+    }
+    fs$1.mkdirSync(prefix, { recursive: true });
+    startGroup(`Download and extract ${url}`);
+    const started = Date.now();
+    await downloadAndExtract(url, prefix, fetcher);
+    info(`Done in ${Math.round((Date.now() - started) / 1000)} s`);
+    endGroup();
+    if (!fs$1.existsSync(hipcc)) {
+        throw new Error(`Extraction finished but ${hipcc} does not exist. ` +
+            `The tarball layout may have changed.`);
+    }
+    fs$1.writeFileSync(marker, `${stamp}\n`);
+}
+
+/**
  * GPU target -> tarball family, Linux-only targets are not listed.
  */
 const FAMILIES$1 = {
@@ -34419,35 +34450,18 @@ async function installWindows(inputs, fetcher = defaultFetcher) {
     const family = windowsFamily(inputs.gfx);
     const prefix = windowsPrefix(inputs.version, process.env['SystemDrive']);
     const hipcc = path$1.win32.join(prefix, 'bin', 'hipcc.exe');
-    const marker = path$1.win32.join(prefix, MARKER_FILE);
     const stamp = `${family} ${inputs.version}`;
     if (inputs.components.some((c) => c !== 'dev')) {
         warning('Input "components" has no effect on Windows; the tarball is installed ' +
             'whole.');
     }
-    const upToDate = fs$1.existsSync(hipcc) &&
-        fs$1.existsSync(marker) &&
-        fs$1.readFileSync(marker, 'utf8').trim() === stamp;
-    if (upToDate) {
-        info(`ROCm ${stamp} is already installed in ${prefix}`);
-        return prefix;
-    }
-    if (fs$1.existsSync(prefix)) {
-        info(`Removing the previous install in ${prefix}`);
-        fs$1.rmSync(prefix, { recursive: true, force: true });
-    }
-    fs$1.mkdirSync(prefix, { recursive: true });
-    const url = tarballUrl(inputs.version, family);
-    startGroup(`Download and extract ${url}`);
-    const started = Date.now();
-    await downloadAndExtract(url, prefix, fetcher);
-    info(`Done in ${Math.round((Date.now() - started) / 1000)} s`);
-    endGroup();
-    if (!fs$1.existsSync(hipcc)) {
-        throw new Error(`Extraction finished but ${hipcc} does not exist. ` +
-            `The tarball layout may have changed.`);
-    }
-    fs$1.writeFileSync(marker, `${stamp}\n`);
+    await installTarball({
+        url: tarballUrl(inputs.version, family),
+        prefix,
+        hipcc,
+        stamp,
+        join: path$1.win32.join
+    }, fetcher);
     return prefix;
 }
 
