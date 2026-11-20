@@ -34941,6 +34941,14 @@ function makePlan(raw, detect) {
     const inputs = parseInputs(raw);
     const scheme = selectScheme(parseVersion(inputs.version));
     const platform = detect();
+    // AMD publishes Linux ROCm for x86_64 only: amd64-only apt repos, x86_64/
+    // RPM repos, x86-64 tarballs (docs/RESEARCH.md). Check before the distro,
+    // so an arm64 Fedora does not fall back to an x86-64 tarball.
+    if (platform.os === 'linux' && platform.arch !== 'x64') {
+        throw new Error(`AMD publishes ROCm for Linux on x86_64 only, and this runner is ` +
+            `${platform.arch}. Use an x86_64 runner, e.g. ubuntu-24.04 instead ` +
+            `of ubuntu-24.04-arm.`);
+    }
     if (platform.os === 'linux' && platform.noPackageRepo) {
         if (scheme === 'legacy') {
             throw new Error(`${platform.noPackageRepo} ROCm ${inputs.version} is only available ` +

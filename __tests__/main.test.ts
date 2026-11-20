@@ -142,6 +142,46 @@ describe('run', () => {
   })
 })
 
+describe('makePlan on a non-x86_64 runner', () => {
+  it.each(['arm64', 'arm', 'ppc64', 's390x'])(
+    'rejects Linux on %s, naming x86_64',
+    (arch) => {
+      expect(() => makePlan(raw, () => ({ ...linux, arch }))).toThrow(
+        new RegExp(
+          `x86_64 only, and this runner is ${arch}\\..*ubuntu-24\\.04-arm`
+        )
+      )
+    }
+  )
+
+  it('rejects arm64 before falling back to the tarball', () => {
+    expect(() =>
+      makePlan(raw, () => ({
+        os: 'linux',
+        arch: 'arm64',
+        distro: '',
+        noPackageRepo: 'Unsupported distribution "fedora 43".'
+      }))
+    ).toThrow(/x86_64 only/)
+  })
+
+  it('still reports a bad input first', () => {
+    expect(() =>
+      makePlan({ ...raw, version: 'nonsense' }, () => ({
+        ...linux,
+        arch: 'arm64'
+      }))
+    ).toThrow(/Invalid ROCm version/)
+  })
+
+  it('leaves Windows alone', () => {
+    expect(
+      makePlan(raw, () => ({ os: 'windows', arch: 'arm64', distro: '' }))
+        .platform.os
+    ).toBe('windows')
+  })
+})
+
 describe('makePlan per package manager', () => {
   const on =
     (distro: string, packageManager: 'apt' | 'dnf' | 'zypper') =>

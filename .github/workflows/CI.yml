@@ -305,7 +305,7 @@ jobs:
   reject-bad-input:
     name: Rejects ${{ matrix.name }}
     needs: check
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner || 'ubuntu-24.04' }}
     strategy:
       fail-fast: false
       matrix:
@@ -335,6 +335,12 @@ jobs:
             gfx: gfx1200
             components: kernel
             expect: 'Invalid component'
+          - name: an arm64 Linux runner
+            runner: ubuntu-24.04-arm
+            version: '10.1.0'
+            gfx: gfx1200
+            components: dev
+            expect: 'AMD publishes ROCm for Linux on x86_64 only'
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Run the action and expect a clean failure
@@ -356,3 +362,7 @@ jobs:
             echo "::error::Failure message did not contain: $EXPECT"
             exit 1
           }
+          for f in /etc/apt/sources.list.d/amdrocm.sources \
+                   /etc/apt/keyrings/amdrocm.gpg /etc/yum.repos.d/amdrocm.repo; do
+            if [ -e "$f" ]; then echo "::error::$f was written"; exit 1; fi
+          done
