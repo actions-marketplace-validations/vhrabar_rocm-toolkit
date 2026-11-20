@@ -1,8 +1,64 @@
 #!/usr/bin/env bash
-# Rebuild and stage dist/ when anything that affects the bundle is staged.
+# 1. Format staged files with Prettier.
+# 2. Rebuild and stage dist/ when anything that affects the bundle is staged.
+
 set -euo pipefail
 
-if git diff --cached --name-only | grep -qE '^(src/|package(-lock)?\.json$|rollup\.config\.mjs$|tsconfig(\.build)?\.json$)'; then
+PRETTIER=node_modules/.bin/prettier
+BUNDLE_INPUTS='^(src/|package(-lock)?\.json$|rollup\.config\.mjs$|tsconfig(\.build)?\.json$)'
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -n "$staged" ] || exit 0
+unstaged=$(git diff --name-only)
+
+# prettier check
+if [ -x "$PRETTIER" ]; then
+  full=()
+  unformatted=()
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    if grep -qxF -- "$file" <<<"$unstaged"; then
+      if ! git show ":$file" |
+        "$PRETTIER" --check --ignore-unknown --stdin-filepath "$file" >/dev/null 2>&1; then
+        unformatted+=("$file")
+      fi
+    else
+      full+=("$file")
+    fi
+  done <<<"$staged"
+
+  if [ ${#full[@]} -gt 0 ]; then
+    "$PRETTIER" --write --ignore-unknown --log-level warn -- "${full[@]}"
+    git add -- "${full[@]}"
+    if git diff --cached --quiet; then
+      echo "pre-commit: nothing left to commit after formatting." >&2
+      exit 1
+    fi
+  fi
+
+  if [ ${#unformatted[@]} -gt 0 ]; then
+    echo "pre-commit: the staged part of these files is not formatted:" >&2
+    printf '  %s\n' "${unformatted[@]}" >&2
+    exit 1
+  fi
+else
+  echo "pre-commit: $PRETTIER not found (run npm ci); skipping formatting." >&2
+fi
+
+# dist/ check
+if grep -qE "$BUNDLE_INPUTS" <<<"$staged"; then
+  dirty=$(
+    {
+      grep -E "$BUNDLE_INPUTS" <<<"$unstaged" || true
+      git ls-files --others --exclude-standard -- src
+    } | sort -u
+  )
+  if [ -n "$dirty" ]; then
+    echo "pre-commit: dist/ would be built from changes that are not staged:" >&2
+    sed 's/^/  /' <<<"$dirty" >&2
+    exit 1
+  fi
+
   echo "pre-commit: rebuilding dist/"
   npm run --silent package >/dev/null
   git add dist

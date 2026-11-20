@@ -34579,6 +34579,28 @@ async function installMultiArch(inputs, distro, pm) {
     return prefix;
 }
 
+/**
+ * What `hipcc` needs from the host to compile and link,
+ * and AMD's RPMs do not pull in.
+ */
+const HIPCC_HOST_PACKAGES = ['gcc-c++'];
+/** Whether `pkg` is installed according to rpm. Needs no root. */
+async function isRpmInstalled(pkg) {
+    const { exitCode } = await getExecOutput('rpm', ['-q', '--quiet', pkg], {
+        silent: true,
+        ignoreReturnCode: true
+    });
+    return exitCode === 0;
+}
+/** Those of `packages` that rpm does not report as installed, in order. */
+async function missingRpms(packages) {
+    const missing = [];
+    for (const pkg of packages)
+        if (!(await isRpmInstalled(pkg)))
+            missing.push(pkg);
+    return missing;
+}
+
 const KEY_PATH = '/etc/pki/rpm-gpg/RPM-GPG-KEY-amdrocm';
 const REPO_FILE_PATH = '/etc/yum.repos.d/amdrocm.repo';
 const REPO_ID = 'amdrocm';
@@ -34592,29 +34614,9 @@ const NO_WEAK_DEPS = '--setopt=install_weak_deps=False';
  * almalinux:10; `ca-certificates` was present everywhere but is cheap to check.
  */
 const DNF_PREREQS = ['ca-certificates', 'gnupg2'];
-/**
- * What `hipcc` needs from the host to compile and link, and AMD's RPMs do not
- * pull in. clang finds the C++ standard library through the GCC installation,
- * and on EL the `libstdc++.so` it links against ships in `gcc-c++`: with only
- * `gcc` + `libstdc++-devel`, almalinux:9 and :10 compile but fail to link
- * ("unable to find library -lstdc++"). `gcc-c++` pulls in both. Installed in
- * the same transaction as ROCm; dnf skips it where present.
- */
-const HIPCC_HOST_PACKAGES = ['gcc-c++'];
-/** Whether `pkg` is installed according to rpm. Needs no root. */
-async function isRpmInstalled(pkg) {
-    const { exitCode } = await getExecOutput('rpm', ['-q', '--quiet', pkg], {
-        silent: true,
-        ignoreReturnCode: true
-    });
-    return exitCode === 0;
-}
 /** Install those of `packages` that are missing; no dnf call otherwise. */
 async function ensureRpmPackages(packages) {
-    const missing = [];
-    for (const pkg of packages)
-        if (!(await isRpmInstalled(pkg)))
-            missing.push(pkg);
+    const missing = await missingRpms(packages);
     if (missing.length === 0)
         return;
     info(`Installing missing prerequisites: ${missing.join(' ')}`);

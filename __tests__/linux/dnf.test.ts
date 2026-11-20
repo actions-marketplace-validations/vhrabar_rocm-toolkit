@@ -27,8 +27,9 @@ jest.spyOn(process, 'getuid').mockReturnValue(0)
 jest.unstable_mockModule('@actions/tool-cache', () => tc)
 jest.unstable_mockModule('node:fs', () => ({ ...fsMock, default: fsMock }))
 
-const { buildRepoFile, dnf, ensureRpmPackages, isRpmInstalled } =
+const { buildRepoFile, dnf, ensureRpmPackages } =
   await import('../../src/linux/dnf.js')
+const { isRpmInstalled, missingRpms } = await import('../../src/linux/rpm.js')
 const { installMultiArch } = await import('../../src/linux/index.js')
 const { KEY_FINGERPRINT } = await import('../../src/linux/key.js')
 
@@ -72,7 +73,7 @@ describe('buildRepoFile', () => {
   })
 })
 
-describe('isRpmInstalled / ensureRpmPackages', () => {
+describe('rpm helpers / ensureRpmPackages', () => {
   it('asks rpm without root', async () => {
     notInstalled = ['gnupg2']
     await expect(isRpmInstalled('gnupg2')).resolves.toBe(false)
@@ -82,6 +83,13 @@ describe('isRpmInstalled / ensureRpmPackages', () => {
       ['-q', '--quiet', 'gnupg2'],
       expect.objectContaining({ ignoreReturnCode: true })
     )
+  })
+
+  it('lists the missing packages in order', async () => {
+    notInstalled = ['gnupg2', 'gcc-c++']
+    await expect(
+      missingRpms(['gcc-c++', 'ca-certificates', 'gnupg2'])
+    ).resolves.toEqual(['gcc-c++', 'gnupg2'])
   })
 
   it('makes no dnf call when everything is installed', async () => {

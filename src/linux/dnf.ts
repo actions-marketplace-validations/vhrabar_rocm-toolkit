@@ -1,10 +1,10 @@
 import * as core from '@actions/core'
-import * as exec from '@actions/exec'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { repoUrl } from './packages.js'
 import { asRoot } from './root.js'
+import { HIPCC_HOST_PACKAGES, missingRpms } from './rpm.js'
 import type { PackageManager } from './types.js'
 
 export const KEY_PATH = '/etc/pki/rpm-gpg/RPM-GPG-KEY-amdrocm'
@@ -23,32 +23,11 @@ const NO_WEAK_DEPS = '--setopt=install_weak_deps=False'
  */
 export const DNF_PREREQS: readonly string[] = ['ca-certificates', 'gnupg2']
 
-/**
- * What `hipcc` needs from the host to compile and link, and AMD's RPMs do not
- * pull in. clang finds the C++ standard library through the GCC installation,
- * and on EL the `libstdc++.so` it links against ships in `gcc-c++`: with only
- * `gcc` + `libstdc++-devel`, almalinux:9 and :10 compile but fail to link
- * ("unable to find library -lstdc++"). `gcc-c++` pulls in both. Installed in
- * the same transaction as ROCm; dnf skips it where present.
- */
-export const HIPCC_HOST_PACKAGES: readonly string[] = ['gcc-c++']
-
-/** Whether `pkg` is installed according to rpm. Needs no root. */
-export async function isRpmInstalled(pkg: string): Promise<boolean> {
-  const { exitCode } = await exec.getExecOutput('rpm', ['-q', '--quiet', pkg], {
-    silent: true,
-    ignoreReturnCode: true
-  })
-  return exitCode === 0
-}
-
 /** Install those of `packages` that are missing; no dnf call otherwise. */
 export async function ensureRpmPackages(
   packages: readonly string[]
 ): Promise<void> {
-  const missing: string[] = []
-  for (const pkg of packages)
-    if (!(await isRpmInstalled(pkg))) missing.push(pkg)
+  const missing = await missingRpms(packages)
   if (missing.length === 0) return
 
   core.info(`Installing missing prerequisites: ${missing.join(' ')}`)
