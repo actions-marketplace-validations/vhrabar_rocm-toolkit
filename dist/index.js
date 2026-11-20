@@ -30461,14 +30461,17 @@ function endGroup() {
     issue('endgroup');
 }
 
-// Versions the action accepts.
-const MULTIARCH_VERSIONS = ['10.0.0', '10.1.0'];
+// Versions the action accepts
+const MULTIARCH_VERSIONS = [
+    '10.0.0',
+    '10.1.0',
+    '10.2.0'
+];
 const LEGACY_VERSIONS = ['6.2.2', '7.0.1', '7.2.4'];
 const SUPPORTED_VERSIONS = [
     ...LEGACY_VERSIONS,
     ...MULTIARCH_VERSIONS
 ];
-const DEFAULT_VERSION = MULTIARCH_VERSIONS.at(-1);
 const VERSION_PATTERN = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 function parseVersion(input) {
     const match = VERSION_PATTERN.exec(input.trim());
@@ -30559,7 +30562,11 @@ function parseBoolean(name, input) {
     throw new Error(`Input "${name}" must be "true" or "false", got "${input}".`);
 }
 function parseInputs(raw) {
-    const version = formatVersion(assertSupported(raw.version || DEFAULT_VERSION));
+    if (!raw.version.trim()) {
+        throw new Error(`Input "version" is required: pin the ROCm version to install, e.g. ` +
+            `${MULTIARCH_VERSIONS.at(-1)}. Supported: ${SUPPORTED_VERSIONS.join(', ')}.`);
+    }
+    const version = formatVersion(assertSupported(raw.version));
     const suffix = raw.logFileSuffix.trim() || 'log.txt';
     if (!SUFFIX_PATTERN.test(suffix)) {
         throw new Error(`Invalid log-file-suffix "${suffix}".`);

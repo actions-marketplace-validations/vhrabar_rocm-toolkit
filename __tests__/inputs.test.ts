@@ -66,9 +66,9 @@ describe('parseInputs', () => {
     })
   })
 
-  it('falls back to defaults for empty values', () => {
+  it('falls back to defaults for empty optional values', () => {
     const result = parseInputs({
-      version: '',
+      version: '10.2.0',
       gfx: '',
       components: '',
       useCache: '',
@@ -77,6 +77,12 @@ describe('parseInputs', () => {
     expect(result.gfx).toEqual([])
     expect(result.components).toEqual(['dev'])
     expect(result.useCache).toBe(true)
+  })
+
+  it.each(['', '   '])('requires a version (%j)', (version) => {
+    expect(() => parseInputs({ ...base, version })).toThrow(
+      /Input "version" is required: pin .* e\.g\. 10\.2\.0\. Supported: 6\.2\.2, .*10\.2\.0\./
+    )
   })
 
   it('rejects an unsafe log suffix', () => {

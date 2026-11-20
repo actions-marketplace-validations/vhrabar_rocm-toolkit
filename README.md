@@ -10,7 +10,7 @@ Pick a ROCm version and a GPU target, get `hipcc` on `PATH`, and the environment
 ```yaml
 - uses: vhrabar/rocm-toolkit@v1
   with:
-    version: '10.1.0'
+    version: '10.2.0'
     gfx: gfx1200
 - run: hipcc --version
 ```
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: vhrabar/rocm-toolkit@v1
         with:
-          version: '10.1.0'
+          version: '10.2.0'
           gfx: gfx1200
       - run: hipcc my_kernel.hip -o my_kernel --offload-arch=gfx1200
 ```
@@ -49,7 +49,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: vhrabar/rocm-toolkit@v1
         with:
-          version: '10.1.0'
+          version: '10.2.0'
           gfx: gfx1200
       - run: hipcc my_kernel.hip -o my_kernel.exe --offload-arch=gfx1200
 ```
@@ -69,7 +69,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: vhrabar/rocm-toolkit@v1
         with:
-          version: '10.1.0'
+          version: '10.2.0'
           gfx: gfx1200
       - run: hipcc my_kernel.hip -o my_kernel --offload-arch=gfx1200
 ```
@@ -96,7 +96,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: vhrabar/rocm-toolkit@v1
         with:
-          version: '10.1.0'
+          version: '10.2.0'
           gfx: gfx1200
 ```
 
@@ -110,7 +110,7 @@ Note that rocPRIM, hipCUB and rocThrust need C++17, which clang does not select 
 
 | Name | Default | Description |
 | --- | --- | --- |
-| `version` | `10.1.0` (the newest supported) | ROCm version, `MAJOR.MINOR.PATCH`. Must be in the [supported list](#supported-versions-and-platforms). |
+| `version` | **required**, no default | ROCm version, `MAJOR.MINOR.PATCH`, e.g. `10.2.0`. Must be in the [supported list](#supported-versions-and-platforms). Pinning it means a workflow never changes ROCm version on its own. |
 | `gfx` | `all` | GPU target, for example `gfx1200`. Comma-separated for several. `all` installs every architecture, which is **large**; set a target whenever you can. |
 | `components` | `dev` | Linux only: comma-separated `runtime`, `dev`, `sdk`, `developer-tools`, `opencl`. `dev` is what you need to compile. Ignored on Windows (the tarball is installed whole). |
 | `use-cache` | `true` | Accepted but currently has no effect (WIP). |
@@ -142,13 +142,13 @@ The apt repository's signing key is checked against a pinned fingerprint before 
 
 | Platform | ROCm versions | Tested in CI |
 | --- | --- | --- |
-| Ubuntu 22.04, 24.04, 26.04 | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, on all three runners and in an `ubuntu:24.04` container |
-| Debian 12, 13 | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, in `debian:12` and `debian:13` containers |
-| RHEL 8, 9, 10 and rebuilds (AlmaLinux, Rocky Linux, CentOS Stream, Oracle Linux, UBI) | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, in `manylinux_2_28`, `almalinux:9` and `almalinux:10` containers |
-| SLES 15, 16 and openSUSE Leap 15, 16 | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, in `bci-base:15.6` and `bci-base:16.0` containers; openSUSE Leap installs the same packages |
-| Other Linux without an AMD package repo (Fedora, Arch, Amazon Linux, ...), glibc 2.28 or newer | 10.0.0, 10.1.0, from the tarball | 10.1.0, `gfx1200`, in an `archlinux:latest` container |
+| Ubuntu 22.04, 24.04, 26.04 | 10.0.0, 10.1.0, 10.2.0 | 10.2.0 on all three runners and in an `ubuntu:24.04` container; 10.1.0 on `ubuntu-24.04` |
+| Debian 12, 13 | 10.0.0, 10.1.0, 10.2.0 | 10.2.0, `gfx1200`, in `debian:12` and `debian:13` containers |
+| RHEL 8, 9, 10 and rebuilds (AlmaLinux, Rocky Linux, CentOS Stream, Oracle Linux, UBI) | 10.0.0, 10.1.0, 10.2.0 | 10.2.0, `gfx1200`, in `manylinux_2_28`, `almalinux:9` and `almalinux:10` containers |
+| SLES 15, 16 and openSUSE Leap 15, 16 | 10.0.0, 10.1.0, 10.2.0 | 10.2.0, `gfx1200`, in `bci-base:15.6` and `bci-base:16.0` containers; openSUSE Leap installs the same packages |
+| Other Linux without an AMD package repo (Fedora, Arch, Amazon Linux, ...), glibc 2.28 or newer | 10.0.0, 10.1.0, 10.2.0, from the tarball | 10.2.0, `gfx1200`, in an `archlinux:latest` container |
 | Ubuntu 22.04, 24.04 | 6.2.2, 7.0.1, 7.2.4 | 7.2.4 only, on both runners and in an `ubuntu:24.04` container |
-| Windows (`windows-2022`, `windows-2025`) | 10.0.0, 10.1.0 | 10.1.0, `gfx1200` |
+| Windows (`windows-2022`, `windows-2025`) | 10.0.0, 10.1.0, 10.2.0 | 10.2.0, `gfx1200` |
 
 Every tested combination installs, runs `hipcc --version` and compiles a HIP program. On hosted runners CI also builds the library smoke project (compile and link only); in bare containers it does not, since they have no `cmake`.
 On a distribution without an AMD package repo the step warns and installs the ROCm tarball instead: into `/opt/rocm/core-X.Y` as root, otherwise under `RUNNER_TOOL_CACHE`. The tarball cannot bring a C++ compiler or `python3`, which `hipcc` needs, so install them first (e.g. `gcc-c++ python3` on Fedora, `gcc python` on Arch).

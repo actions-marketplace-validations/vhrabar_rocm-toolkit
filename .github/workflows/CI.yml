@@ -16,6 +16,10 @@ jobs:
   check:
     name: Format, lint, typecheck, test
     runs-on: ubuntu-latest
+    outputs:
+      latest: ${{ steps.versions.outputs.latest }}
+      previous: ${{ steps.versions.outputs.previous }}
+      legacy: ${{ steps.versions.outputs.legacy }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
@@ -27,15 +31,29 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - name: ROCm versions to test
+        id: versions
+        run: |
+          node --input-type=module -e "
+            const v = await import('./src/versions.ts')
+            console.log('latest=' + v.MULTIARCH_VERSIONS.at(-1))
+            console.log('previous=' + v.MULTIARCH_VERSIONS.at(-2))
+            console.log('legacy=' + v.LEGACY_VERSIONS.at(-1))
+          " | tee -a "$GITHUB_OUTPUT"
 
   install-linux:
-    name: Install on ${{ matrix.os }}
+    name: Install ROCm ${{ needs.check.outputs[matrix.release || 'latest'] }} on ${{ matrix.os }}
     needs: check
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-26.04]
+        include:
+          - os: ubuntu-22.04
+          - os: ubuntu-24.04
+          - os: ubuntu-26.04
+          - os: ubuntu-24.04
+            release: previous
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Disk before
@@ -44,18 +62,25 @@ jobs:
         id: rocm
         uses: ./
         with:
-          version: '10.1.0'
+          version: ${{ needs.check.outputs[matrix.release || 'latest'] }}
           gfx: gfx1200
       - name: Disk after
         run: df -h /
       - name: Check outputs and environment
+        env:
+          VERSION: ${{ steps.rocm.outputs.version }}
+          REQUESTED: ${{ needs.check.outputs[matrix.release || 'latest'] }}
         run: |
-          echo "ROCM_PATH=$ROCM_PATH HIP_PATH=$HIP_PATH"
-          echo "output ROCM_PATH=${{ steps.rocm.outputs.ROCM_PATH }}"
-          echo "output version=${{ steps.rocm.outputs.version }}"
-          test -d "$ROCM_PATH"
-          test "$ROCM_PATH" = "${{ steps.rocm.outputs.ROCM_PATH }}"
-          test "${{ steps.rocm.outputs.version }}" = "10.1.0"
+          echo "ROCM_PATH=$ROCM_PATH HIP_PATH=$HIP_PATH version=$VERSION"
+          test "$VERSION" = "$REQUESTED"
+          # 10.x: /opt/rocm/core-MAJOR.MINOR; legacy: /opt/rocm-X.Y.Z
+          case "$VERSION" in
+            1[0-9].*) EXPECTED=/opt/rocm/core-${VERSION%.*} ;;
+            *) EXPECTED=/opt/rocm-$VERSION ;;
+          esac
+          test "$ROCM_PATH" = "$EXPECTED"
+          test "${{ steps.rocm.outputs.ROCM_PATH }}" = "$EXPECTED"
+          test -x "$ROCM_PATH/bin/hipcc"
       - name: hipcc --version
         run: hipcc --version
       - name: Compile and link a HIP program
@@ -69,7 +94,7 @@ jobs:
         id: again
         uses: ./
         with:
-          version: '10.1.0'
+          version: ${{ needs.check.outputs[matrix.release || 'latest'] }}
           gfx: gfx1200
       - name: Both runs agree
         run: |
@@ -78,7 +103,7 @@ jobs:
           hipcc .github/smoke/hello.hip -o hello2 --offload-arch=gfx1200
 
   install-legacy:
-    name: Install ROCm 7.2.4 on ${{ matrix.os }}
+    name: Install ROCm ${{ needs.check.outputs.legacy }} on ${{ matrix.os }}
     needs: check
     runs-on: ${{ matrix.os }}
     strategy:
@@ -93,15 +118,23 @@ jobs:
         id: rocm
         uses: ./
         with:
-          version: '7.2.4'
+          version: ${{ needs.check.outputs.legacy }}
       - name: Disk after
         run: df -h /
       - name: Check outputs and environment
+        env:
+          VERSION: ${{ steps.rocm.outputs.version }}
+          REQUESTED: ${{ needs.check.outputs.legacy }}
         run: |
-          echo "ROCM_PATH=$ROCM_PATH HIP_PATH=$HIP_PATH"
-          test "$ROCM_PATH" = "/opt/rocm-7.2.4"
-          test "${{ steps.rocm.outputs.ROCM_PATH }}" = "/opt/rocm-7.2.4"
-          test "${{ steps.rocm.outputs.version }}" = "7.2.4"
+          echo "ROCM_PATH=$ROCM_PATH HIP_PATH=$HIP_PATH version=$VERSION"
+          test "$VERSION" = "$REQUESTED"
+          # 10.x: /opt/rocm/core-MAJOR.MINOR; legacy: /opt/rocm-X.Y.Z
+          case "$VERSION" in
+            1[0-9].*) EXPECTED=/opt/rocm/core-${VERSION%.*} ;;
+            *) EXPECTED=/opt/rocm-$VERSION ;;
+          esac
+          test "$ROCM_PATH" = "$EXPECTED"
+          test "${{ steps.rocm.outputs.ROCM_PATH }}" = "$EXPECTED"
           test -x "$ROCM_PATH/bin/hipcc"
       - name: hipcc --version
         run: hipcc --version
@@ -113,7 +146,7 @@ jobs:
           cmake --build build
 
   install-container:
-    name: Install ROCm ${{ matrix.version }} in ${{ matrix.image }}
+    name: Install ROCm ${{ needs.check.outputs[matrix.release || 'latest'] }} in ${{ matrix.image }}
     needs: check
     runs-on: ubuntu-24.04
     container:
@@ -125,54 +158,35 @@ jobs:
       matrix:
         include:
           - image: 'ubuntu:24.04'
-            version: '10.1.0'
             gfx: gfx1200
-            rocm-path: /opt/rocm/core-10.1
             absent: sudo gpg
           - image: 'debian:12'
-            version: '10.1.0'
             gfx: gfx1200
-            rocm-path: /opt/rocm/core-10.1
             absent: sudo gpg
           - image: 'debian:13'
-            version: '10.1.0'
             gfx: gfx1200
-            rocm-path: /opt/rocm/core-10.1
             absent: sudo gpg
           - image: 'ubuntu:24.04'
-            version: '7.2.4'
+            release: legacy
             gfx: ''
-            rocm-path: /opt/rocm-7.2.4
             absent: sudo gpg
           - image: 'quay.io/pypa/manylinux_2_28_x86_64'
-            version: '10.1.0'
             gfx: gfx1200
-            rocm-path: /opt/rocm/core-10.1
             absent: sudo
           - image: 'almalinux:9'
-            version: '10.1.0'
             gfx: gfx1200
-            rocm-path: /opt/rocm/core-10.1
             absent: sudo
           - image: 'almalinux:10'
-            version: '10.1.0'
             gfx: gfx1200
-            rocm-path: /opt/rocm/core-10.1
             absent: sudo gpg
           - image: 'registry.suse.com/bci/bci-base:15.6'
-            version: '10.1.0'
             gfx: gfx1200
-            rocm-path: /opt/rocm/core-10.1
             absent: sudo
           - image: 'registry.suse.com/bci/bci-base:16.0'
-            version: '10.1.0'
             gfx: gfx1200
-            rocm-path: /opt/rocm/core-10.1
             absent: sudo
           - image: 'archlinux:latest'
-            version: '10.1.0'
             gfx: gfx1200
-            rocm-path: /opt/rocm/core-10.1
             absent: sudo
             setup: pacman -Syu --noconfirm --needed gcc python
     steps:
@@ -196,16 +210,22 @@ jobs:
         id: rocm
         uses: ./
         with:
-          version: ${{ matrix.version }}
+          version: ${{ needs.check.outputs[matrix.release || 'latest'] }}
           gfx: ${{ matrix.gfx }}
       - name: Check outputs and environment
         env:
-          EXPECTED: ${{ matrix.rocm-path }}
+          VERSION: ${{ steps.rocm.outputs.version }}
+          REQUESTED: ${{ needs.check.outputs[matrix.release || 'latest'] }}
         run: |
-          echo "ROCM_PATH=$ROCM_PATH HIP_PATH=$HIP_PATH"
+          echo "ROCM_PATH=$ROCM_PATH HIP_PATH=$HIP_PATH version=$VERSION"
+          test "$VERSION" = "$REQUESTED"
+          # 10.x: /opt/rocm/core-MAJOR.MINOR; legacy: /opt/rocm-X.Y.Z
+          case "$VERSION" in
+            1[0-9].*) EXPECTED=/opt/rocm/core-${VERSION%.*} ;;
+            *) EXPECTED=/opt/rocm-$VERSION ;;
+          esac
           test "$ROCM_PATH" = "$EXPECTED"
           test "${{ steps.rocm.outputs.ROCM_PATH }}" = "$EXPECTED"
-          test "${{ steps.rocm.outputs.version }}" = "${{ matrix.version }}"
           test -x "$ROCM_PATH/bin/hipcc"
       - name: hipcc --version
         run: hipcc --version
@@ -217,7 +237,7 @@ jobs:
         id: again
         uses: ./
         with:
-          version: ${{ matrix.version }}
+          version: ${{ needs.check.outputs[matrix.release || 'latest'] }}
           gfx: ${{ matrix.gfx }}
       - name: Both runs agree
         run: |
@@ -226,7 +246,7 @@ jobs:
           hipcc .github/smoke/hello.hip -o hello2 --offload-arch=gfx1200
 
   install-windows:
-    name: Install on ${{ matrix.os }}
+    name: Install ROCm ${{ needs.check.outputs.latest }} on ${{ matrix.os }}
     needs: check
     runs-on: ${{ matrix.os }}
     strategy:
@@ -241,20 +261,23 @@ jobs:
         id: rocm
         uses: ./
         with:
-          version: '10.1.0'
+          version: ${{ needs.check.outputs.latest }}
           gfx: gfx1200
       - name: Disk after
         run: Get-PSDrive C | Format-Table Name, Used, Free
       - name: Check outputs and environment
+        env:
+          VERSION: ${{ steps.rocm.outputs.version }}
         run: |
+          if ($env:VERSION -ne '${{ needs.check.outputs.latest }}') { throw "version output is $env:VERSION" }
+          $mm = ($env:VERSION -split '\.')[0..1] -join '.'
           "ROCM_PATH=$env:ROCM_PATH"
           "HIP_PATH=$env:HIP_PATH"
           "HIP_DEVICE_LIB_PATH=$env:HIP_DEVICE_LIB_PATH"
-          if ($env:ROCM_PATH -ne 'C:\rocm\core-10.1') { throw "ROCM_PATH is $env:ROCM_PATH" }
+          if ($env:ROCM_PATH -ne "C:\rocm\core-$mm") { throw "ROCM_PATH is $env:ROCM_PATH" }
           if ($env:HIP_PATH -ne $env:ROCM_PATH) { throw "HIP_PATH is $env:HIP_PATH" }
           if (-not (Test-Path "$env:HIP_DEVICE_LIB_PATH\ocml.bc")) { throw 'device libraries not found' }
           if ('${{ steps.rocm.outputs.ROCM_PATH }}' -ne $env:ROCM_PATH) { throw 'ROCM_PATH output differs' }
-          if ('${{ steps.rocm.outputs.version }}' -ne '10.1.0') { throw 'version output differs' }
           if (-not (Test-Path "$env:ROCM_PATH\bin\hipcc.exe")) { throw 'hipcc.exe missing' }
       - name: hipcc --version
         run: hipcc --version
@@ -274,25 +297,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # One case per line: expected message | version | gfx | components
+          # One case per line: expected message | version | gfx | components.
+          # @latest stands for the newest supported version.
           - name: bad inputs
             runner: ubuntu-24.04
             cases: |
               is not in the supported list|10.9.999|gfx1200|dev
               does not support|8.0.0|gfx1200|dev
-              Invalid ROCm version|10.1.0; id|gfx1200|dev
-              Invalid gfx target|10.1.0|gfx1200;id|dev
-              Invalid component|10.1.0|gfx1200|kernel
+              Input "version" is required||gfx1200|dev
+              Invalid ROCm version|@latest; id|gfx1200|dev
+              Invalid gfx target|@latest|gfx1200;id|dev
+              Invalid component|@latest|gfx1200|kernel
           - name: an arm64 Linux runner
             runner: ubuntu-24.04-arm
             cases: |
-              AMD publishes ROCm for Linux on x86_64 only|10.1.0|gfx1200|dev
+              AMD publishes ROCm for Linux on x86_64 only|@latest|gfx1200|dev
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Run the action and expect a clean failure for each case
         env:
           CASES: ${{ matrix.cases }}
+          LATEST: ${{ needs.check.outputs.latest }}
         run: |
+          CASES=${CASES//@latest/$LATEST}
           failed=0
           while IFS='|' read -r expect version gfx components; do
             [ -n "$expect" ] || continue

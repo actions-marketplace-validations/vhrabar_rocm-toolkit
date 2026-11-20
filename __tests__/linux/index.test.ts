@@ -45,6 +45,7 @@ describe('installPrefix / majorMinor', () => {
   it('uses MAJOR.MINOR only', () => {
     expect(majorMinor('10.1.0')).toBe('10.1')
     expect(installPrefix('10.1.0')).toBe('/opt/rocm/core-10.1')
+    expect(installPrefix('10.2.0')).toBe('/opt/rocm/core-10.2')
     expect(installPrefix('10.0.0')).toBe('/opt/rocm/core-10.0')
   })
 })
@@ -109,6 +110,15 @@ describe('packageNames', () => {
         'apt'
       )
     ).toEqual(['amdrocm-developer-tools10.1', 'amdrocm-opencl10.1'])
+  })
+
+  it('follows the same pattern for 10.2', () => {
+    expect(packageNames('10.2.0', ['gfx1200'], ['dev'], 'apt')).toEqual([
+      'amdrocm-core-dev10.2-gfx1200'
+    ])
+    expect(packageNames('10.2.0', ['gfx1200'], ['dev'], 'dnf')).toEqual([
+      'amdrocm-core-devel10.2-gfx1200'
+    ])
   })
 
   // Names as listed under rocm/core/packages/{rhel9,sles16}/x86_64/.

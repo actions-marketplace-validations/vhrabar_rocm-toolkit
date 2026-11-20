@@ -6,16 +6,18 @@ export interface RocmVersion {
   patch: number
 }
 
-// Versions the action accepts.
-export const MULTIARCH_VERSIONS: readonly string[] = ['10.0.0', '10.1.0']
+// Versions the action accepts
+export const MULTIARCH_VERSIONS: readonly string[] = [
+  '10.0.0',
+  '10.1.0',
+  '10.2.0'
+]
 export const LEGACY_VERSIONS: readonly string[] = ['6.2.2', '7.0.1', '7.2.4']
 
 export const SUPPORTED_VERSIONS: readonly string[] = [
   ...LEGACY_VERSIONS,
   ...MULTIARCH_VERSIONS
 ]
-
-export const DEFAULT_VERSION: string = MULTIARCH_VERSIONS.at(-1) as string
 
 const VERSION_PATTERN = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/
 

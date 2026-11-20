@@ -1,5 +1,5 @@
 import {
-  DEFAULT_VERSION,
+  MULTIARCH_VERSIONS,
   assertSupported,
   parseVersion,
   selectScheme
@@ -40,8 +40,12 @@ describe('selectScheme', () => {
 })
 
 describe('assertSupported', () => {
-  it('accepts the default version', () => {
-    expect(() => assertSupported(DEFAULT_VERSION)).not.toThrow()
+  it('lists the multi-arch versions oldest first, 10.2.0 newest', () => {
+    expect(MULTIARCH_VERSIONS).toEqual(['10.0.0', '10.1.0', '10.2.0'])
+  })
+
+  it.each(['10.0.0', '10.1.0', '10.2.0'])('accepts %s', (v) => {
+    expect(() => assertSupported(v)).not.toThrow()
   })
 
   it('rejects a well-formed version that is not listed', () => {
