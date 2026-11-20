@@ -131,7 +131,10 @@ jobs:
     name: Install ROCm ${{ matrix.version }} in ${{ matrix.image }}
     needs: check
     runs-on: ubuntu-24.04
-    container: ${{ matrix.image }}
+    container:
+      image: ${{ matrix.image }}
+      env:
+        PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     strategy:
       fail-fast: false
       matrix:
@@ -186,7 +189,26 @@ jobs:
             gfx: gfx1200
             rocm-path: /opt/rocm/core-10.1
             absent: sudo gpg
+          - image: 'registry.suse.com/bci/bci-base:15.6'
+            version: '10.1.0'
+            gfx: gfx1200
+            rocm-path: /opt/rocm/core-10.1
+            absent: sudo
+          - image: 'registry.suse.com/bci/bci-base:16.0'
+            version: '10.1.0'
+            gfx: gfx1200
+            rocm-path: /opt/rocm/core-10.1
+            absent: sudo
+          - image: 'opensuse/leap:15.6'
+            version: '10.1.0'
+            gfx: gfx1200
+            rocm-path: /opt/rocm/core-10.1
+            absent: sudo
+            checkout-setup: zypper --non-interactive install --no-recommends tar gzip
     steps:
+      - name: Tools for actions/checkout
+        if: matrix.checkout-setup
+        run: ${{ matrix.checkout-setup }}
       - uses: actions/checkout@v7.0.1
       - name: The image is bare (root, without ${{ matrix.absent }})
         env:

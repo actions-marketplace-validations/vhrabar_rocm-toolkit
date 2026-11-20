@@ -25,6 +25,12 @@ exported variable is a breaking change.
   `gnupg2` is installed first, and `gcc-c++` with ROCm, because `hipcc` needs
   it to compile and link. ROCm 7.2.x and older on RHEL fail early with a clear
   message ([#17]).
+- **Linux, SLES 15 and 16, openSUSE Leap (ROCm 10.x):** installs from AMD's
+  RPM repository with zypper, as root in SLES BCI and Leap containers. The
+  fingerprint-checked key is imported with `rpm --import`, never
+  auto-imported, and the repository file turns on `gpgcheck`, `repo_gpgcheck`
+  and `pkg_gpgcheck`. `gcc-c++` is installed with ROCm, as on RHEL. ROCm 7.2.x
+  and older on SLES fail early with a clear message ([#18]).
 
 ## [1.0.0] - 2026-11-18
 
@@ -61,3 +67,4 @@ First release.
 [1.0.0]: https://github.com/vhrabar/rocm-toolkit/releases/tag/v1.0.0
 [#15]: https://github.com/vhrabar/rocm-toolkit/issues/15
 [#17]: https://github.com/vhrabar/rocm-toolkit/issues/17
+[#18]: https://github.com/vhrabar/rocm-toolkit/issues/18

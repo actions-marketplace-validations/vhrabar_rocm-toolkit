@@ -3,7 +3,8 @@
 > **Unofficial.** This project is not affiliated with, endorsed by, or sponsored by AMD. "AMD", "ROCm", and "HIP" are trademarks
 > of Advanced Micro Devices, Inc. (AMD) and are used here only to describe what the action installs.
 
-Unofficial GitHub Action that installs AMD ROCm (HIP, compilers, libraries) on Ubuntu runners, in Ubuntu, Debian and RHEL-family job containers (including `manylinux_2_28`), and on Windows runners. 
+Unofficial GitHub Action that installs AMD ROCm (HIP, compilers, libraries) on Ubuntu runners, in Ubuntu, Debian, RHEL-family (including `manylinux_2_28`),
+SLES and openSUSE Leap job containers, and on Windows runners. 
 Pick a ROCm version and a GPU target, get `hipcc` on `PATH`, and the environment variables you need to build.
 
 ```yaml
@@ -77,6 +78,8 @@ Privileged commands run through `sudo`, or directly when the job already runs as
 On Ubuntu and Debian, if `ca-certificates` or `gpg` are missing, the step installs them.
 On RHEL 8, 9 and 10 and their rebuilds (AlmaLinux, Rocky Linux, CentOS Stream, Oracle Linux, UBI, `manylinux_2_28`) the step uses dnf with signature checks on for both packages and
 repository metadata. It installs `gnupg2` if it is missing, and `gcc-c++`, which `hipcc` needs to compile and link and AMD's RPMs do not pull in.
+On SLES 15 and 16 and openSUSE Leap the step uses zypper, again with signature checks on for packages and repository metadata, and installs `gcc-c++` for the same reason.
+The AMD key is imported with `rpm --import` after its fingerprint is checked; keys are never auto-imported.
 Only missing packages are installed; nothing else is added to the image.
 Additional tools beyond ROCm, such as `cmake`, are up to the end-user.
 
@@ -142,6 +145,7 @@ The apt repository's signing key is checked against a pinned fingerprint before 
 | Ubuntu 22.04, 24.04, 26.04 | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, on runners and in containers |
 | Debian 12, 13 | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, in containers only |
 | RHEL 8, 9, 10 and rebuilds (AlmaLinux, Rocky Linux, CentOS Stream, Oracle Linux, UBI) | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, in `manylinux_2_28`, `almalinux:9` and `almalinux:10` containers |
+| SLES 15, 16 and openSUSE Leap 15, 16 | 10.0.0, 10.1.0 | 10.1.0, `gfx1200`, in `bci-base:15.6`, `bci-base:16.0` and `opensuse/leap:15.6` containers |
 | Ubuntu 22.04, 24.04 | 6.2.2, 7.0.1, 7.2.4 | 7.2.4 only, on runners and in containers |
 | Windows (`windows-2022`, `windows-2025`) | 10.0.0, 10.1.0 | 10.1.0, `gfx1200` |
 
@@ -154,8 +158,17 @@ A version outside the lis is rejected with a clear error. Windows supports ROCm 
 
 - `gfx: all` on Windows is untested. It selects the 4.5 GB `multiarch` tarball. `windows-2025` runners have only about 28 to 33 GB of free disk, so it may not fit.
 - Only the `gfx120X-all` Windows family has been checked against the tarball contents. The mapping for the other families follows the file names.
-- The legacy flow has no Ubuntu 26.04, Debian or RHEL support. On RHEL-family distros use ROCm 10.0.0 or newer.
-- Of the RHEL rebuilds, only AlmaLinux (and `manylinux_2_28`, which is based on it) is tested in CI.
+- The legacy flow has no Ubuntu 26.04, Debian, RHEL or SLES support. On those distros use ROCm 10.0.0 or newer.
+- Of the RHEL rebuilds, only AlmaLinux (and `manylinux_2_28`, which is based on it) is tested in CI. openSUSE Leap 16 is not tested in CI.
+- On SLES and openSUSE Leap, AMD's packages do not create `/usr/bin/hipcc`. Use `hipcc` from `PATH`, where the step puts `$ROCM_PATH/bin`.
+- The `registry.suse.com/bci/*` and `opensuse/leap` images declare no `PATH`. In those job containers, once the step adds `$ROCM_PATH/bin` to `PATH`, the runner runs later steps with only that directory on `PATH`, and they fail with `exec: "sh": executable file not found in $PATH`. Set `PATH` on the container:
+
+  ```yaml
+  container:
+    image: registry.suse.com/bci/bci-base:16.0
+    env:
+      PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  ```
 - Anything marked "not tested" above is not covered by CI.
 
 The facts the action relies on, how each was checked and what is still open are in
