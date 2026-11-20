@@ -1,6 +1,7 @@
 import type { PackageManagerKind } from '../platform.js'
 import { apt } from './apt.js'
 import { dnf } from './dnf.js'
+import { zypper } from './zypper.js'
 import type { PackageManager } from './types.js'
 
 /**
@@ -8,7 +9,8 @@ import type { PackageManager } from './types.js'
  */
 const MANAGERS: Partial<Record<PackageManagerKind, PackageManager>> = {
   apt,
-  dnf
+  dnf,
+  zypper
 }
 
 export function packageManagerFor(

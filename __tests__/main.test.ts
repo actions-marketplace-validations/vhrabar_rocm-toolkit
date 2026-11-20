@@ -70,18 +70,20 @@ describe('run', () => {
     detectPlatform.mockReturnValue(linux)
   })
 
-  it('installs through dnf on a RHEL-family distro', async () => {
+  it.each([
+    ['rhel9', 'dnf' as const],
+    ['sles15', 'zypper' as const]
+  ])('installs on %s through %s', async (distro, packageManager) => {
     core.getInput.mockImplementation(
       (name) => (raw as Record<string, string>)[name] ?? ''
     )
-    const rhel: Platform = { ...linux, distro: 'rhel9', packageManager: 'dnf' }
-    detectPlatform.mockReturnValue(rhel)
+    detectPlatform.mockReturnValue({ ...linux, distro, packageManager })
     installMultiArch.mockRejectedValueOnce(new Error('stop here'))
     await run()
-    expect(installMultiArch).toHaveBeenCalledWith(
+    expect(installMultiArch).toHaveBeenLastCalledWith(
       expect.objectContaining({ version: '10.1.0' }),
-      'rhel9',
-      expect.objectContaining({ kind: 'dnf' })
+      distro,
+      expect.objectContaining({ kind: packageManager })
     )
   })
 
@@ -120,16 +122,26 @@ describe('makePlan per package manager', () => {
     expect(plan.platform.packageManager).toBe('dnf')
   })
 
-  it('rejects zypper until it has a flow', () => {
-    expect(() => makePlan(raw, on('sles15', 'zypper'))).toThrow(
-      /Detected sles15, which uses zypper\..*apt .* and dnf .* only; sles15 is not supported yet/
+  it('accepts ROCm 10.x on a zypper distro', () => {
+    const plan = makePlan(raw, on('sles15', 'zypper'))
+    expect(plan.scheme).toBe('multiarch')
+    expect(plan.platform.packageManager).toBe('zypper')
+  })
+
+  it('rejects legacy versions on a zypper distro before doing anything', () => {
+    expect(() =>
+      makePlan({ ...raw, version: '7.2.4' }, on('sles16', 'zypper'))
+    ).toThrow(
+      /ROCm 7\.2\.4 is not available on sles16\..*use ROCm 10\.0\.0 or newer/
     )
   })
 
   it('rejects a Linux platform without a package manager', () => {
     expect(() =>
       makePlan(raw, () => ({ os: 'linux', arch: 'x64', distro: 'x' }))
-    ).toThrow(/which uses an unknown package manager/)
+    ).toThrow(
+      /which uses an unknown package manager\..*apt .*, dnf .* and zypper .* only\./
+    )
   })
 
   it('rejects legacy versions on a dnf distro before doing anything', () => {

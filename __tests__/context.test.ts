@@ -75,6 +75,23 @@ describe('describePlan', () => {
     ])
   })
 
+  it('lists the x86_64 repo and RPM package names on a zypper distro', () => {
+    expect(
+      describePlan({
+        ...multiarch,
+        platform: {
+          ...multiarch.platform,
+          distro: 'sles15',
+          packageManager: 'zypper'
+        }
+      }).slice(1)
+    ).toEqual([
+      'Platform: linux x64, sles15 (zypper)',
+      'Repo:     https://stable.repo.amd.com/rocm/core/packages/sles15/x86_64/',
+      'Packages: amdrocm-core-devel10.1-gfx1200'
+    ])
+  })
+
   it('does not guess package names without a package manager', () => {
     const platform = { ...multiarch.platform, packageManager: undefined }
     expect(describePlan({ ...multiarch, platform }).slice(2)).toEqual([

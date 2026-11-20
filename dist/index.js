@@ -34602,8 +34602,8 @@ async function missingRpms(packages) {
 }
 
 const KEY_PATH = '/etc/pki/rpm-gpg/RPM-GPG-KEY-amdrocm';
-const REPO_FILE_PATH = '/etc/yum.repos.d/amdrocm.repo';
-const REPO_ID = 'amdrocm';
+const REPO_FILE_PATH$1 = '/etc/yum.repos.d/amdrocm.repo';
+const REPO_ID$1 = 'amdrocm';
 /**
  * Every dnf call mus pas -y
  */
@@ -34623,9 +34623,9 @@ async function ensureRpmPackages(packages) {
     await asRoot([...DNF, 'install', NO_WEAK_DEPS, ...missing]);
 }
 /** The .repo file for `distro` (e.g. rhel9), with both signature checks on. */
-function buildRepoFile(distro) {
+function buildRepoFile$1(distro) {
     return [
-        `[${REPO_ID}]`,
+        `[${REPO_ID$1}]`,
         'name=AMD ROCm',
         `baseurl=${repoUrl(distro, 'dnf')}`,
         'enabled=1',
@@ -34644,16 +34644,71 @@ const dnf = {
         await asRoot(['install', '-D', '-m', '0644', keyFile, KEY_PATH]);
         await asRoot(['rpm', '--import', KEY_PATH]);
         const tmp = path$1.join(process.env['RUNNER_TEMP'] ?? os$1.tmpdir(), 'amdrocm.repo');
-        fs$1.writeFileSync(tmp, buildRepoFile(distro));
-        await asRoot(['install', '-m', '0644', tmp, REPO_FILE_PATH]);
+        fs$1.writeFileSync(tmp, buildRepoFile$1(distro));
+        await asRoot(['install', '-m', '0644', tmp, REPO_FILE_PATH$1]);
     },
     async install(packages) {
         // Fetch and verify the AMD metadata first -> chech signature
-        await asRoot([...DNF, 'makecache', '--repo', REPO_ID]);
+        await asRoot([...DNF, 'makecache', '--repo', REPO_ID$1]);
         await asRoot([
             ...DNF,
             'install',
             NO_WEAK_DEPS,
+            ...packages,
+            ...HIPCC_HOST_PACKAGES
+        ]);
+    }
+};
+
+const REPO_FILE_PATH = '/etc/zypp/repos.d/amdrocm.repo';
+const REPO_ID = 'amdrocm';
+/** Never prompt: an unknown key or a conflict fails instead of hanging. */
+const ZYPPER = ['zypper', '--non-interactive'];
+const NO_RECOMMENDS = '--no-recommends';
+/**
+ * Present in every SLES 15/16 and openSUSE Leap image checked
+ * but cheap to verify fo SHRs
+ */
+const ZYPPER_PREREQS = ['ca-certificates', 'gpg2'];
+/**
+ * The repo definition for `distr'.
+ */
+function buildRepoFile(distro) {
+    return [
+        `[${REPO_ID}]`,
+        'name=AMD ROCm',
+        'enabled=1',
+        'autorefresh=1',
+        `baseurl=${repoUrl(distro, 'zypper')}`,
+        'type=rpm-md',
+        'gpgcheck=1',
+        'repo_gpgcheck=1',
+        'pkg_gpgcheck=1',
+        ''
+    ].join('\n');
+}
+const zypper = {
+    kind: 'zypper',
+    async ensurePrereqs() {
+        const missing = await missingRpms(ZYPPER_PREREQS);
+        if (missing.length === 0)
+            return;
+        info(`Installing missing prerequisites: ${missing.join(' ')}`);
+        await asRoot([...ZYPPER, 'install', NO_RECOMMENDS, ...missing]);
+    },
+    async addRepo(distro, keyFile) {
+        await asRoot(['rpm', '--import', keyFile]);
+        const tmp = path$1.join(process.env['RUNNER_TEMP'] ?? os$1.tmpdir(), 'amdrocm.repo');
+        fs$1.writeFileSync(tmp, buildRepoFile(distro));
+        await asRoot(['install', '-m', '0644', tmp, REPO_FILE_PATH]);
+    },
+    async install(packages) {
+        // Fetch and verify the AMD metadata first - > fail signature
+        await asRoot([...ZYPPER, 'refresh', REPO_ID]);
+        await asRoot([
+            ...ZYPPER,
+            'install',
+            NO_RECOMMENDS,
             ...packages,
             ...HIPCC_HOST_PACKAGES
         ]);
@@ -34665,7 +34720,8 @@ const dnf = {
  */
 const MANAGERS = {
     apt,
-    dnf
+    dnf,
+    zypper
 };
 function packageManagerFor(kind) {
     return kind ? MANAGERS[kind] : undefined;
@@ -34781,8 +34837,8 @@ function makePlan(raw, detect) {
         const pm = platform.packageManager ?? 'an unknown package manager';
         if (!packageManagerFor(platform.packageManager)) {
             throw new Error(`Detected ${platform.distro}, which uses ${pm}. This version of the ` +
-                `action installs ROCm through apt (Ubuntu, Debian) and dnf (RHEL ` +
-                `family) only; ${platform.distro} is not supported yet.`);
+                `action installs ROCm through apt (Ubuntu, Debian), dnf (RHEL ` +
+                `family) and zypper (SLES, openSUSE Leap) only.`);
         }
         if (scheme === 'legacy' && pm !== 'apt') {
             throw new Error(`ROCm ${inputs.version} is not available on ${platform.distro}. ` +

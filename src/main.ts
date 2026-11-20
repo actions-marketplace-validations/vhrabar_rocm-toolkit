@@ -43,8 +43,8 @@ export function makePlan(
     if (!packageManagerFor(platform.packageManager)) {
       throw new Error(
         `Detected ${platform.distro}, which uses ${pm}. This version of the ` +
-          `action installs ROCm through apt (Ubuntu, Debian) and dnf (RHEL ` +
-          `family) only; ${platform.distro} is not supported yet.`
+          `action installs ROCm through apt (Ubuntu, Debian), dnf (RHEL ` +
+          `family) and zypper (SLES, openSUSE Leap) only.`
       )
     }
     if (scheme === 'legacy' && pm !== 'apt') {
