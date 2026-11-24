@@ -74,6 +74,13 @@ const FAMILIES: readonly Family[] = [
   }
 ]
 
+/** Every `rocm/core/packages/` directory the action knows */
+export function knownRepoDirs(): string[] {
+  return FAMILIES.flatMap((f) =>
+    f.versions.map((v) => `${f.repo}${v.replace('.', '')}`)
+  )
+}
+
 export function parseOsRelease(text: string): OsRelease {
   const fields = new Map<string, string>()
   for (const line of text.split('\n')) {
