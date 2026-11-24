@@ -13,8 +13,9 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+    "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*.ts", "__tests__/**/*.ts"],
+  "include": ["src/**/*.ts", "__tests__/**/*.ts", ".github/scripts/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

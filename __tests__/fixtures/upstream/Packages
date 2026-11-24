@@ -1,0 +1,72 @@
+Package: amdrocm-core-dev10.2-gfx1200
+Architecture: amd64
+Version: 10.2.0-2
+Priority: optional
+Section: devel
+Maintainer: ROCm Dev Support <rocm-dev.support@amd.com>
+Installed-Size: 13
+Depends: amdrocm-core10.2-gfx1200 (= 10.2.0-2), amdrocm-runtime-dev10.2 (= 10.2.0-2), amdrocm-llvm-dev10.2 (= 10.2.0-2), amdrocm-fft-dev10.2 (= 10.2.0-2), amdrocm-blas-dev10.2 (= 10.2.0-2), amdrocm-sparse-dev10.2 (= 10.2.0-2), amdrocm-solver-dev10.2 (= 10.2.0-2), amdrocm-rand-dev10.2 (= 10.2.0-2), amdrocm-ccl-dev10.2 (= 10.2.0-2), amdrocm-opencl-dev10.2 (= 10.2.0-2), amdrocm-hipblas-common-dev10.2 (= 10.2.0-2), amdrocm-rccl-dev10.2 (= 10.2.0-2), amdrocm-rocshmem-dev10.2 (= 10.2.0-2), amdrocm-dnn-dev10.2 (= 10.2.0-2), amdrocm-hipfile-dev10.2 (= 10.2.0-2), amdrocm-decode-dev10.2 (= 10.2.0-2), amdrocm-jpeg-dev10.2 (= 10.2.0-2), amdrocm-threads10.2 (= 10.2.0-2), amdrocm-rpp-dev10.2 (= 10.2.0-2)
+Filename: pool/main/amdrocm-core-dev10.2-gfx1200_10.2.0-2_amd64.deb
+Size: 2720
+MD5sum: 1188259cd0e5d7204ace46b5f5fd9438
+SHA1: a2465663682d08af3a6d97aae9efd04bc21a4ae0
+SHA256: de55c24127fe65deebc6159aac294650727b050b0c57dfea2a1ea27ce2c6779a
+SHA512: 52a128559f0f62322c75e564783bcab2b2aa0afaaffed1584cff07e39651aa4f8dd8db69022ceddeee6e8cccc26637e617ba55d3d9651a6ac7817f42ce96ddd9
+Homepage: https://github.com/ROCm/rocm-libraries
+Description: ROCm core development metapackage with headers and build tools
+ Metapackage aggregating core ROCm development components. Installs compiler toolchains, runtime development headers, CMake modules, and build utilities required for developing ROCm applications. Provides complete development environment for building GPU-accelerated software.
+
+Package: amdrocm10.0
+Architecture: amd64
+Version: 10.0.0-4
+Priority: optional
+Section: devel
+Maintainer: ROCm Dev Support <rocm-dev.support@amd.com>
+Installed-Size: 9
+Depends: amdrocm10.0-gfx1010 (= 10.0.0-4), amdrocm10.0-gfx1011 (= 10.0.0-4), amdrocm10.0-gfx1012 (= 10.0.0-4), amdrocm10.0-gfx1030 (= 10.0.0-4), amdrocm10.0-gfx1031 (= 10.0.0-4), amdrocm10.0-gfx1032 (= 10.0.0-4), amdrocm10.0-gfx1033 (= 10.0.0-4), amdrocm10.0-gfx1034 (= 10.0.0-4), amdrocm10.0-gfx1035 (= 10.0.0-4), amdrocm10.0-gfx1036 (= 10.0.0-4), amdrocm10.0-gfx1100 (= 10.0.0-4), amdrocm10.0-gfx1101 (= 10.0.0-4), amdrocm10.0-gfx1102 (= 10.0.0-4), amdrocm10.0-gfx1103 (= 10.0.0-4), amdrocm10.0-gfx1150 (= 10.0.0-4), amdrocm10.0-gfx1151 (= 10.0.0-4), amdrocm10.0-gfx1152 (= 10.0.0-4), amdrocm10.0-gfx1153 (= 10.0.0-4), amdrocm10.0-gfx1200 (= 10.0.0-4), amdrocm10.0-gfx1201 (= 10.0.0-4), amdrocm10.0-gfx1250 (= 10.0.0-4), amdrocm10.0-gfx908 (= 10.0.0-4), amdrocm10.0-gfx90a (= 10.0.0-4), amdrocm10.0-gfx942 (= 10.0.0-4), amdrocm10.0-gfx950 (= 10.0.0-4)
+Filename: pool/main/amdrocm10.0_10.0.0-4_amd64.deb
+Size: 1260
+MD5sum: 212d37c2caaf89d878f88c30e9559afe
+SHA1: 65ad645f45a3b6a9f04add4cb8e58866406c9493
+SHA256: ef0cffe17f45388f19129f18ed900f94d0115b5255703796d3bc4809e4583d7a
+SHA512: 6c9fb03236a0fdf368f138eeb0b462750636edd1d53909d306e6b5139d50bc3b1ad6905e70edb44b36d538e757f9d5cbb9ccc0ca47dd8e813eba619f715cd1af
+Homepage: https://github.com/ROCm/rocm-libraries
+Description: AMD ROCm metapackage
+ ROCm core runtime and libraries
+
+Package: amdrocm10.1
+Architecture: amd64
+Version: 10.1.0-3
+Priority: optional
+Section: devel
+Maintainer: ROCm Dev Support <rocm-dev.support@amd.com>
+Installed-Size: 9
+Depends: amdrocm10.1-gfx1010 (= 10.1.0-3), amdrocm10.1-gfx1011 (= 10.1.0-3), amdrocm10.1-gfx1012 (= 10.1.0-3), amdrocm10.1-gfx1030 (= 10.1.0-3), amdrocm10.1-gfx1031 (= 10.1.0-3), amdrocm10.1-gfx1032 (= 10.1.0-3), amdrocm10.1-gfx1033 (= 10.1.0-3), amdrocm10.1-gfx1034 (= 10.1.0-3), amdrocm10.1-gfx1035 (= 10.1.0-3), amdrocm10.1-gfx1036 (= 10.1.0-3), amdrocm10.1-gfx1100 (= 10.1.0-3), amdrocm10.1-gfx1101 (= 10.1.0-3), amdrocm10.1-gfx1102 (= 10.1.0-3), amdrocm10.1-gfx1103 (= 10.1.0-3), amdrocm10.1-gfx1150 (= 10.1.0-3), amdrocm10.1-gfx1151 (= 10.1.0-3), amdrocm10.1-gfx1152 (= 10.1.0-3), amdrocm10.1-gfx1153 (= 10.1.0-3), amdrocm10.1-gfx1200 (= 10.1.0-3), amdrocm10.1-gfx1201 (= 10.1.0-3), amdrocm10.1-gfx1250 (= 10.1.0-3), amdrocm10.1-gfx908 (= 10.1.0-3), amdrocm10.1-gfx90a (= 10.1.0-3), amdrocm10.1-gfx942 (= 10.1.0-3), amdrocm10.1-gfx950 (= 10.1.0-3)
+Filename: pool/main/amdrocm10.1_10.1.0-3_amd64.deb
+Size: 1416
+MD5sum: 4618f238bd53a69d21f4e3df221b481d
+SHA1: a30a26fe9238b79aa8f89ba4c835b828f037beeb
+SHA256: bd3db1e69e3936ad5b2159d2d0a301a5cc0f43b1c54900f9b98efc78b92ed813
+SHA512: 47b3b0e76d7ab87c42a7771b38af3f97014d7d8f98698a11bbc34591eb90839dd9edc31ce8c9779714349ad78bc71bd3231e3295fa199f0d3ad293f3094985e6
+Homepage: https://github.com/ROCm/rocm-libraries
+Description: ROCm core runtime metapackage with essential GPU libraries
+ Metapackage aggregating core ROCm runtime components and libraries. Installs essential runtime dependencies for GPU computing including HIP runtime, base utilities, and fundamental libraries. Provides complete runtime environment for executing ROCm applications without development tools.
+
+Package: amdrocm10.2
+Architecture: amd64
+Version: 10.2.0-2
+Priority: optional
+Section: devel
+Maintainer: ROCm Dev Support <rocm-dev.support@amd.com>
+Installed-Size: 9
+Depends: amdrocm10.2-gfx1010 (= 10.2.0-2), amdrocm10.2-gfx1011 (= 10.2.0-2), amdrocm10.2-gfx1012 (= 10.2.0-2), amdrocm10.2-gfx1030 (= 10.2.0-2), amdrocm10.2-gfx1031 (= 10.2.0-2), amdrocm10.2-gfx1032 (= 10.2.0-2), amdrocm10.2-gfx1033 (= 10.2.0-2), amdrocm10.2-gfx1034 (= 10.2.0-2), amdrocm10.2-gfx1035 (= 10.2.0-2), amdrocm10.2-gfx1036 (= 10.2.0-2), amdrocm10.2-gfx1100 (= 10.2.0-2), amdrocm10.2-gfx1101 (= 10.2.0-2), amdrocm10.2-gfx1102 (= 10.2.0-2), amdrocm10.2-gfx1103 (= 10.2.0-2), amdrocm10.2-gfx1150 (= 10.2.0-2), amdrocm10.2-gfx1151 (= 10.2.0-2), amdrocm10.2-gfx1152 (= 10.2.0-2), amdrocm10.2-gfx1153 (= 10.2.0-2), amdrocm10.2-gfx1200 (= 10.2.0-2), amdrocm10.2-gfx1201 (= 10.2.0-2), amdrocm10.2-gfx1250 (= 10.2.0-2), amdrocm10.2-gfx908 (= 10.2.0-2), amdrocm10.2-gfx90a (= 10.2.0-2), amdrocm10.2-gfx942 (= 10.2.0-2), amdrocm10.2-gfx950 (= 10.2.0-2)
+Filename: pool/main/amdrocm10.2_10.2.0-2_amd64.deb
+Size: 1416
+MD5sum: 4eacea3a6b16fea86c900f0ccaf80c3a
+SHA1: 84c3d90b3c8b4624d7b2bcfedea863eb91f30430
+SHA256: 68de49feabc06906993da823679f65e4b10e4afeb8ca7bc7517a1f1132251abe
+SHA512: 2c4393fc29fef7be50c3c21440cfa9b8e891d7555d3e02a6d9e95dced4bfbf5f21202e0b5d1297a56eee989dd4d64cf4ec9a295bc7e2af9f518a6ab6d479644d
+Homepage: https://github.com/ROCm/rocm-libraries
+Description: ROCm core runtime metapackage with essential GPU libraries
+ Metapackage aggregating core ROCm runtime components and libraries. Installs essential runtime dependencies for GPU computing including HIP runtime, base utilities, and fundamental libraries. Provides complete runtime environment for executing ROCm applications without development tools.
+
